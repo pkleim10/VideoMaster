@@ -1,0 +1,19 @@
+# Xcode
+VideoMaster.xcodeproj/
+DerivedData/
+*.xcworkspace
+xcuserdata/
+
+# SPM
+.build/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Cursor
+.cursor/
+
+# Misc
+*.swp
+*~
