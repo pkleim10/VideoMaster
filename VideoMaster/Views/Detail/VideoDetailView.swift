@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 
 struct VideoDetailView: View {
@@ -6,70 +7,150 @@ struct VideoDetailView: View {
     let thumbnailService: ThumbnailService
     @State private var tags: [Tag] = []
     @State private var newTagName: String = ""
+    @State private var isCreatingTag = false
     @State private var thumbnail: NSImage?
-    @State private var showPlayer = false
+    @State private var isEditingName = false
+    @State private var editedName: String = ""
+    @State private var inlinePlayer: AVPlayer?
+    private static let defaultDetailHeight: CGFloat = 330
+    @State private var detailHeight: CGFloat = VideoDetailView.defaultDetailHeight
 
     var body: some View {
         GeometryReader { geo in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    thumbnailSection(maxHeight: geo.size.height * 0.6)
-                    titleSection
-                    Divider()
-                    detailsAndAttributesRow
+            let totalHeight = geo.size.height
+            let handleHeight: CGFloat = 8
+            let clampedDetailHeight = min(max(100, detailHeight), totalHeight - 100 - handleHeight)
+            let thumbnailHeight = max(100, totalHeight - clampedDetailHeight - handleHeight)
+
+            VStack(spacing: 0) {
+                thumbnailSection(maxHeight: thumbnailHeight)
+                    .frame(height: thumbnailHeight)
+                    .padding(.horizontal)
+                    .padding(.top)
+
+                resizeHandle(totalHeight: totalHeight)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        titleSection
+                        Divider()
+                        detailsAndAttributesRow
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
                 }
-                .padding()
+                .frame(height: clampedDetailHeight)
             }
         }
         .task(id: video.id) {
+            stopInlinePlayback()
+            viewModel.isPlayingInline = false
+            isEditingName = false
+            viewModel.isEditingText = false
             await loadData()
-        }
-        .sheet(isPresented: $showPlayer) {
-            VideoPlayerView(url: video.url)
-                .frame(minWidth: 640, minHeight: 480)
         }
     }
 
-    // MARK: - Thumbnail + Play
+    private func resizeHandle(totalHeight: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(height: 8)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let newHeight = detailHeight - value.translation.height
+                        detailHeight = min(totalHeight - 108, max(100, newHeight))
+                    }
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(width: 40, height: 4)
+            }
+    }
+
+    // MARK: - Thumbnail + Inline Player
 
     private func thumbnailSection(maxHeight: CGFloat) -> some View {
         ZStack {
-            if let thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.1))
+            if viewModel.isPlayingInline, let player = inlinePlayer {
+                FloatingPlayerView(player: player)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay {
-                        Image(systemName: "film")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.secondary)
-                    }
+            } else {
+                if let thumbnail {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.1))
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            Image(systemName: "film")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.secondary)
+                        }
+                }
             }
-
-            Button(action: playVideo) {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.3), radius: 8)
-            }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: maxHeight)
+        .onChange(of: viewModel.isPlayingInline) { _, isPlaying in
+            if isPlaying {
+                startInlinePlayback()
+            } else {
+                stopInlinePlayback()
+            }
+        }
+        .onChange(of: viewModel.inlinePlayPauseToggle) { _, _ in
+            guard let player = inlinePlayer else { return }
+            if player.timeControlStatus == .playing {
+                player.pause()
+            } else {
+                player.play()
+            }
+        }
+    }
+
+    private func startInlinePlayback() {
+        let player = AVPlayer(url: video.url)
+        inlinePlayer = player
+        player.play()
+        Task { await viewModel.recordPlay(for: video) }
+    }
+
+    private func stopInlinePlayback() {
+        inlinePlayer?.pause()
+        inlinePlayer = nil
     }
 
     // MARK: - Title
 
     private var titleSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(video.fileName)
-                .font(.title2)
-                .fontWeight(.semibold)
-                .textSelection(.enabled)
+            if isEditingName {
+                TextField("File name", text: $editedName)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commitRename() }
+                    .onExitCommand { cancelRename() }
+            } else {
+                Text(video.fileName)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .onTapGesture {
+                        editedName = video.fileName
+                        isEditingName = true
+                        viewModel.isEditingText = true
+                    }
+            }
 
             Text(video.filePath)
                 .font(.caption)
@@ -157,7 +238,7 @@ struct VideoDetailView: View {
                     .font(.headline)
                 RatingView(rating: video.rating, size: 20) { newRating in
                     Task {
-                        await viewModel.updateRating(for: video, rating: newRating)
+                        await viewModel.updateRating(forVideos: selectedIds, rating: newRating)
                     }
                 }
             }
@@ -168,29 +249,84 @@ struct VideoDetailView: View {
                 Text("Tags")
                     .font(.headline)
 
-                FlowLayout(spacing: 6) {
-                    ForEach(tags) { tag in
-                        TagChip(tag: tag) {
-                            Task {
-                                await viewModel.removeTag(tag, from: video)
-                                tags = await viewModel.tagsForVideo(video)
+                if viewModel.tags.isEmpty {
+                    Text("No tags yet — create one below")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    FlowLayout(spacing: 6) {
+                        ForEach(viewModel.tags) { tag in
+                            TagToggleChip(
+                                tag: tag,
+                                isActive: tags.contains(where: { $0.id == tag.id })
+                            ) { isAdding in
+                                Task {
+                                    let selected = selectedIds
+                                    if isAdding {
+                                        await viewModel.addTag(tag.name, toVideos: selected)
+                                    } else {
+                                        await viewModel.removeTag(tag, fromVideos: selected)
+                                    }
+                                    tags = viewModel.tagsForVideos(selected)
+                                }
                             }
                         }
                     }
                 }
 
-                HStack {
-                    TextField("Add tag...", text: $newTagName)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { addTag() }
-                    Button("Add", action: addTag)
+                Divider()
+
+                if isCreatingTag {
+                    HStack(spacing: 4) {
+                        TextField("Tag name", text: $newTagName)
+                            .textFieldStyle(.roundedBorder)
+                            .controlSize(.small)
+                            .onSubmit { addTag() }
+                        Button(action: addTag) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                        .buttonStyle(.plain)
                         .disabled(newTagName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Button(action: { isCreatingTag = false; newTagName = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    Button(action: { isCreatingTag = true }) {
+                        Label("New Tag", systemImage: "plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
                 }
             }
         }
     }
 
     // MARK: - Actions
+
+    private func commitRename() {
+        let newName = editedName.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty, newName != video.fileName else {
+            cancelRename()
+            return
+        }
+        Task {
+            if await viewModel.renameVideo(video, to: newName) != nil {
+                isEditingName = false
+                viewModel.isEditingText = false
+            }
+        }
+    }
+
+    private func cancelRename() {
+        isEditingName = false
+        viewModel.isEditingText = false
+        editedName = ""
+    }
 
     private func playVideo() {
         NSWorkspace.shared.open(video.url)
@@ -206,18 +342,26 @@ struct VideoDetailView: View {
                 thumbnail = NSImage(contentsOf: url)
             }
         }
-        tags = await viewModel.tagsForVideo(video)
+        tags = viewModel.tagsForVideos(selectedIds)
+    }
+
+    private var selectedIds: Set<String> {
+        let ids = viewModel.selectedVideoIds
+        return ids.isEmpty ? [video.id] : ids
     }
 
     private func addTag() {
         let name = newTagName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         Task {
-            await viewModel.addTag(name, to: video)
+            let selected = selectedIds
+            await viewModel.addTag(name, toVideos: selected)
             newTagName = ""
-            tags = await viewModel.tagsForVideo(video)
+            isCreatingTag = false
+            tags = viewModel.tagsForVideos(selected)
         }
     }
+
 }
 
 struct MetadataRow: View {
@@ -231,6 +375,24 @@ struct MetadataRow: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.callout)
+        }
+    }
+}
+
+struct FloatingPlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .floating
+        view.showsFullScreenToggleButton = true
+        return view
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        if nsView.player !== player {
+            nsView.player = player
         }
     }
 }

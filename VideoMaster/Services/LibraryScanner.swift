@@ -102,6 +102,102 @@ actor LibraryScanner {
         }
     }
 
+    func scanForNewFiles(folders: [URL], knownPaths: Set<String>) -> AsyncStream<ScanUpdate> {
+        AsyncStream { continuation in
+            Task { [weak self] in
+                guard let self else {
+                    continuation.finish()
+                    return
+                }
+                await self.performNewFilesScan(folders: folders, knownPaths: knownPaths, continuation: continuation)
+            }
+        }
+    }
+
+    private func performNewFilesScan(
+        folders: [URL],
+        knownPaths: Set<String>,
+        continuation: AsyncStream<ScanUpdate>.Continuation
+    ) async {
+        var newFiles: [URL] = []
+        for folder in folders {
+            for file in discoverVideoFiles(in: folder) where !knownPaths.contains(file.path) {
+                newFiles.append(file)
+            }
+        }
+
+        guard !newFiles.isEmpty else {
+            continuation.yield(.started(total: 0))
+            continuation.yield(.completed)
+            continuation.finish()
+            return
+        }
+
+        continuation.yield(.started(total: newFiles.count))
+
+        let concurrencyLimit = 4
+        var processed = 0
+
+        await withTaskGroup(of: Void.self) { group in
+            for (index, fileURL) in newFiles.enumerated() {
+                if index >= concurrencyLimit {
+                    await group.next()
+                }
+
+                group.addTask { [self] in
+                    await self.importFile(fileURL)
+                }
+
+                processed += 1
+                continuation.yield(
+                    .progress(
+                        current: processed,
+                        total: newFiles.count,
+                        fileName: fileURL.lastPathComponent
+                    )
+                )
+            }
+
+            await group.waitForAll()
+        }
+
+        continuation.yield(.completed)
+        continuation.finish()
+    }
+
+    private func importFile(_ fileURL: URL) async {
+        do {
+            let metadata = await metadataExtractor.extract(from: fileURL)
+
+            let videoInput = Video(
+                filePath: fileURL.path,
+                fileName: fileURL.lastPathComponent,
+                fileSize: metadata.fileSize,
+                duration: metadata.duration,
+                width: metadata.width,
+                height: metadata.height,
+                codec: metadata.codec,
+                frameRate: metadata.frameRate,
+                creationDate: metadata.creationDate,
+                dateAdded: Date(),
+                rating: 0,
+                playCount: 0
+            )
+
+            let video = try await videoRepo.insert(videoInput)
+
+            Task.detached { [thumbnailService, videoRepo] in
+                if let url = try? await thumbnailService.generateThumbnail(for: video),
+                   let dbId = video.databaseId
+                {
+                    try? await videoRepo.updateThumbnailPath(videoId: dbId, path: url.path)
+                }
+            }
+        } catch {
+            print("Failed to import \(fileURL.lastPathComponent): \(error)")
+        }
+    }
+
     private func discoverVideoFiles(in folder: URL) -> [URL] {
         var results: [URL] = []
         guard let enumerator = FileManager.default.enumerator(

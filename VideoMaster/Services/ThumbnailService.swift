@@ -81,6 +81,20 @@ actor ThumbnailService {
         return image
     }
 
+    func migrateCacheKey(from oldFilePath: String, to newFilePath: String) {
+        let oldDiskURL = thumbnailURL(for: oldFilePath)
+        let newDiskURL = thumbnailURL(for: newFilePath)
+        if FileManager.default.fileExists(atPath: oldDiskURL.path) {
+            try? FileManager.default.moveItem(at: oldDiskURL, to: newDiskURL)
+        }
+        let oldKey = oldFilePath as NSString
+        let newKey = newFilePath as NSString
+        if let image = memoryCache.object(forKey: oldKey) {
+            memoryCache.setObject(image, forKey: newKey)
+            memoryCache.removeObject(forKey: oldKey)
+        }
+    }
+
     func clearCache() throws {
         memoryCache.removeAllObjects()
         let contents = try FileManager.default.contentsOfDirectory(

@@ -20,7 +20,7 @@ struct SortMenuButton: View {
                         if currentSort == sort {
                             viewModel.tableSortOrder = sort.comparators(ascending: !isAscending)
                         } else {
-                            viewModel.tableSortOrder = sort.comparators(ascending: false)
+                            viewModel.tableSortOrder = sort.comparators(ascending: true)
                         }
                     }
                     viewModel.savePreferences()

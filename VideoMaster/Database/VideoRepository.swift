@@ -62,6 +62,17 @@ struct VideoRepository {
         }
     }
 
+    func updateRating(videoIds: [Int64], rating: Int) async throws {
+        try await dbPool.write { db in
+            for id in videoIds {
+                try db.execute(
+                    sql: "UPDATE video SET rating = ? WHERE id = ?",
+                    arguments: [rating, id]
+                )
+            }
+        }
+    }
+
     func updateThumbnailPath(videoId: Int64, path: String) async throws {
         try await dbPool.write { db in
             try db.execute(
@@ -83,6 +94,22 @@ struct VideoRepository {
     func videoExists(filePath: String) async throws -> Bool {
         try await dbPool.read { db in
             try Video.filter(Column("filePath") == filePath).fetchCount(db) > 0
+        }
+    }
+
+    func renameVideo(videoId: Int64, newFilePath: String, newFileName: String) async throws {
+        try await dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE video SET filePath = ?, fileName = ? WHERE id = ?",
+                arguments: [newFilePath, newFileName, videoId]
+            )
+        }
+    }
+
+    func fetchAllFilePaths() async throws -> Set<String> {
+        try await dbPool.read { db in
+            let paths = try String.fetchAll(db, sql: "SELECT filePath FROM video")
+            return Set(paths)
         }
     }
 }

@@ -8,11 +8,19 @@ struct LibraryListView: View {
         Table(
             viewModel.filteredVideos,
             selection: $viewModel.selectedVideoIds,
-            sortOrder: Binding(
+            sortOrder: Binding<[KeyPathComparator<Video>]>(
                 get: { viewModel.tableSortOrder },
                 set: { newValue in
+                    let oldSort = VideoSort.from(keyPath: viewModel.tableSortOrder.first?.keyPath ?? \Video.dateAdded)
+                    let newSort = VideoSort.from(keyPath: newValue.first?.keyPath ?? \Video.dateAdded)
+                    let resolved: [KeyPathComparator<Video>]
+                    if oldSort != newSort {
+                        resolved = newSort.comparators(ascending: true)
+                    } else {
+                        resolved = newValue
+                    }
                     withAnimation(nil) {
-                        viewModel.tableSortOrder = newValue
+                        viewModel.tableSortOrder = resolved
                     }
                     viewModel.savePreferences()
                 }

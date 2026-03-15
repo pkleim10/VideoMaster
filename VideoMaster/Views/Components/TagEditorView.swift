@@ -33,6 +33,31 @@ struct TagChip: View {
     }
 }
 
+struct TagToggleChip: View {
+    let tag: Tag
+    let isActive: Bool
+    let onToggle: (_ isAdding: Bool) -> Void
+
+    var body: some View {
+        Button {
+            onToggle(!isActive)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                    .font(.caption2)
+                    .foregroundStyle(isActive ? Color.accentColor : .secondary)
+                Text(tag.name)
+                    .font(.caption)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isActive ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
