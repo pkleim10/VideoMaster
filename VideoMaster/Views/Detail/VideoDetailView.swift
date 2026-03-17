@@ -8,12 +8,18 @@ struct VideoDetailView: View {
     @State private var tags: [Tag] = []
     @State private var newTagName: String = ""
     @State private var isCreatingTag = false
+    @FocusState private var isTagFieldFocused: Bool
     @State private var thumbnail: NSImage?
+    @State private var filmstrip: NSImage?
+    @State private var filmstripRows: Int = 2
+    @State private var filmstripColumns: Int = 4
     @State private var isEditingName = false
     @State private var editedName: String = ""
     @State private var inlinePlayer: AVPlayer?
-    private static let defaultDetailHeight: CGFloat = 330
-    @State private var detailHeight: CGFloat = VideoDetailView.defaultDetailHeight
+    private var detailHeight: CGFloat {
+        get { viewModel.detailHeight }
+        nonmutating set { viewModel.detailHeight = newValue }
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -47,7 +53,21 @@ struct VideoDetailView: View {
             viewModel.isPlayingInline = false
             isEditingName = false
             viewModel.isEditingText = false
+            filmstrip = nil
+            thumbnail = nil
             await loadData()
+            if viewModel.pendingAutoPlay {
+                viewModel.pendingAutoPlay = false
+                viewModel.isPlayingInline = true
+            }
+        }
+        .onChange(of: viewModel.filmstripRefreshId) { _, _ in
+            Task {
+                filmstrip = await thumbnailService.loadFilmstrip(for: video.filePath)
+                if let fs = filmstrip {
+                    inferFilmstripGrid(from: fs)
+                }
+            }
         }
     }
 
@@ -81,29 +101,49 @@ struct VideoDetailView: View {
                 FloatingPlayerView(player: player)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                if let thumbnail {
-                    Image(nsImage: thumbnail)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.1))
-                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay {
-                            Image(systemName: "film")
-                                .font(.system(size: 48))
-                                .foregroundStyle(.secondary)
+            } else if let filmstrip {
+                Image(nsImage: filmstrip)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .onHover { hovering in
+                        if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                    }
+                    .overlay {
+                        GeometryReader { imgGeo in
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { location in
+                                    handleFilmstripClick(
+                                        at: location,
+                                        in: imgGeo.size
+                                    )
+                                }
                         }
-                }
+                    }
+            } else if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.1))
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay {
+                        Image(systemName: "film")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                    }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: maxHeight)
         .onChange(of: viewModel.isPlayingInline) { _, isPlaying in
             if isPlaying {
-                startInlinePlayback()
+                if inlinePlayer == nil {
+                    startInlinePlayback()
+                }
             } else {
                 stopInlinePlayback()
             }
@@ -119,9 +159,19 @@ struct VideoDetailView: View {
     }
 
     private func startInlinePlayback() {
+        startInlinePlayback(at: 0)
+    }
+
+    private func startInlinePlayback(at seconds: Double) {
         let player = AVPlayer(url: video.url)
         inlinePlayer = player
-        player.play()
+        if seconds > 0 {
+            player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { _ in
+                player.play()
+            }
+        } else {
+            player.play()
+        }
         Task { await viewModel.recordPlay(for: video) }
     }
 
@@ -130,45 +180,67 @@ struct VideoDetailView: View {
         inlinePlayer = nil
     }
 
+    private func handleFilmstripClick(at location: CGPoint, in size: CGSize) {
+        guard let duration = video.duration, duration > 0 else { return }
+        let cellWidth = size.width / CGFloat(filmstripColumns)
+        let cellHeight = size.height / CGFloat(filmstripRows)
+        let col = min(Int(location.x / cellWidth), filmstripColumns - 1)
+        let row = min(Int(location.y / cellHeight), filmstripRows - 1)
+        let frameIndex = row * filmstripColumns + col
+        let totalFrames = filmstripRows * filmstripColumns
+        let seekTime = duration * Double(frameIndex + 1) / Double(totalFrames + 1)
+
+        stopInlinePlayback()
+        startInlinePlayback(at: seekTime)
+        viewModel.isPlayingInline = true
+    }
+
     // MARK: - Title
 
     private var titleSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if isEditingName {
-                TextField("File name", text: $editedName)
+            if isMultiSelect {
+                Text("\(selectedIds.count) Videos Selected")
                     .font(.title2)
                     .fontWeight(.semibold)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { commitRename() }
-                    .onExitCommand { cancelRename() }
+                    .foregroundStyle(.secondary)
             } else {
-                Text(video.fileName)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .onTapGesture {
-                        editedName = video.fileName
-                        isEditingName = true
-                        viewModel.isEditingText = true
-                    }
-            }
-
-            Text(video.filePath)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .lineLimit(2)
-
-            HStack(spacing: 12) {
-                Button("Play Video") { playVideo() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-
-                Button("Show in Finder") {
-                    NSWorkspace.shared.selectFile(video.filePath, inFileViewerRootedAtPath: "")
+                if isEditingName {
+                    TextField("File name", text: $editedName)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { commitRename() }
+                        .onExitCommand { cancelRename() }
+                } else {
+                    Text(video.fileName)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .onTapGesture {
+                            editedName = video.fileName
+                            isEditingName = true
+                            viewModel.isEditingText = true
+                        }
                 }
-                .controlSize(.small)
+
+                Text(video.filePath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+
+                HStack(spacing: 12) {
+                    Button("Play Video") { playVideo() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.selectFile(video.filePath, inFileViewerRootedAtPath: "")
+                    }
+                    .controlSize(.small)
+                }
+                .padding(.top, 4)
             }
-            .padding(.top, 4)
         }
     }
 
@@ -194,37 +266,85 @@ struct VideoDetailView: View {
             Text("Details")
                 .font(.headline)
 
-            LazyVGrid(
-                columns: [GridItem(.flexible()), GridItem(.flexible())],
-                alignment: .leading, spacing: 10
-            ) {
-                MetadataRow(label: "Resolution", value: video.resolution ?? "Unknown")
-                MetadataRow(
-                    label: "Duration", value: video.formattedDuration ?? "Unknown"
-                )
-                MetadataRow(label: "File Size", value: video.formattedFileSize)
-                MetadataRow(label: "Codec", value: video.codec ?? "Unknown")
-                MetadataRow(
-                    label: "Frame Rate",
-                    value: video.frameRate.map { String(format: "%.2f fps", $0) } ?? "Unknown"
-                )
-                MetadataRow(
-                    label: "Date Added",
-                    value: video.dateAdded.formatted(date: .abbreviated, time: .shortened)
-                )
-                if let created = video.creationDate {
-                    MetadataRow(
-                        label: "Created",
-                        value: created.formatted(date: .abbreviated, time: .shortened)
-                    )
+            if isMultiSelect {
+                let vids = selectedVideos
+                LazyVGrid(
+                    columns: [GridItem(.flexible()), GridItem(.flexible())],
+                    alignment: .leading, spacing: 10
+                ) {
+                    MetadataRow(label: "Resolution", value: {
+                        if let outer = commonOptionalValue(\.resolution), let res = outer { return res }
+                        return "--"
+                    }())
+                    MetadataRow(label: "Duration", value: {
+                        if let outer = commonOptionalValue(\.duration), let d = outer {
+                            return d.formattedDuration
+                        }
+                        return "--"
+                    }())
+                    MetadataRow(label: "File Size", value: commonValue(\.fileSize).map { $0.formattedFileSize } ?? "--")
+                    MetadataRow(label: "Codec", value: {
+                        if let outer = commonOptionalValue(\.codec), let c = outer { return c }
+                        return "--"
+                    }())
+                    MetadataRow(label: "Frame Rate", value: {
+                        if let outer = commonOptionalValue(\.frameRate), let fr = outer {
+                            return String(format: "%.2f fps", fr)
+                        }
+                        return "--"
+                    }())
+                    MetadataRow(label: "Date Added", value: commonValue(\.dateAdded)?.formatted(date: .abbreviated, time: .shortened) ?? "--")
+                    MetadataRow(label: "Created", value: {
+                        if let outer = commonOptionalValue(\.creationDate), let date = outer {
+                            return date.formatted(date: .abbreviated, time: .shortened)
+                        }
+                        return "--"
+                    }())
+                    MetadataRow(label: "Last Played", value: {
+                        if let outer = commonOptionalValue(\.lastPlayed), let date = outer {
+                            return date.formatted(date: .abbreviated, time: .shortened)
+                        }
+                        return "--"
+                    }())
+                    MetadataRow(label: "Play Count", value: {
+                        if let pc = commonValue(\.playCount) { return "\(pc)" }
+                        return "--"
+                    }())
+                    MetadataRow(label: "Videos", value: "\(vids.count)")
                 }
-                if let lastPlayed = video.lastPlayed {
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.flexible()), GridItem(.flexible())],
+                    alignment: .leading, spacing: 10
+                ) {
+                    MetadataRow(label: "Resolution", value: video.resolution ?? "Unknown")
                     MetadataRow(
-                        label: "Last Played",
-                        value: lastPlayed.formatted(date: .abbreviated, time: .shortened)
+                        label: "Duration", value: video.formattedDuration ?? "Unknown"
                     )
+                    MetadataRow(label: "File Size", value: video.formattedFileSize)
+                    MetadataRow(label: "Codec", value: video.codec ?? "Unknown")
+                    MetadataRow(
+                        label: "Frame Rate",
+                        value: video.frameRate.map { String(format: "%.2f fps", $0) } ?? "Unknown"
+                    )
+                    MetadataRow(
+                        label: "Date Added",
+                        value: video.dateAdded.formatted(date: .abbreviated, time: .shortened)
+                    )
+                    if let created = video.creationDate {
+                        MetadataRow(
+                            label: "Created",
+                            value: created.formatted(date: .abbreviated, time: .shortened)
+                        )
+                    }
+                    if let lastPlayed = video.lastPlayed {
+                        MetadataRow(
+                            label: "Last Played",
+                            value: lastPlayed.formatted(date: .abbreviated, time: .shortened)
+                        )
+                    }
+                    MetadataRow(label: "Play Count", value: "\(video.playCount)")
                 }
-                MetadataRow(label: "Play Count", value: "\(video.playCount)")
             }
         }
     }
@@ -236,10 +356,10 @@ struct VideoDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Rating")
                     .font(.headline)
-                RatingView(rating: video.rating, size: 20) { newRating in
-                    Task {
-                        await viewModel.updateRating(forVideos: selectedIds, rating: newRating)
-                    }
+                RatingView(rating: isMultiSelect ? (commonValue(\.rating) ?? 0) : video.rating, size: 20) { newRating in
+                    let ids = selectedIds
+                    viewModel.applyRating(to: ids, rating: newRating)
+                    Task { await viewModel.persistRating(for: ids, rating: newRating) }
                 }
             }
 
@@ -260,6 +380,13 @@ struct VideoDetailView: View {
                                 tag: tag,
                                 isActive: tags.contains(where: { $0.id == tag.id })
                             ) { isAdding in
+                                if isAdding {
+                                    if !tags.contains(where: { $0.id == tag.id }) {
+                                        tags.append(tag)
+                                    }
+                                } else {
+                                    tags.removeAll { $0.id == tag.id }
+                                }
                                 Task {
                                     let selected = selectedIds
                                     if isAdding {
@@ -281,7 +408,15 @@ struct VideoDetailView: View {
                         TextField("Tag name", text: $newTagName)
                             .textFieldStyle(.roundedBorder)
                             .controlSize(.small)
+                            .focused($isTagFieldFocused)
                             .onSubmit { addTag() }
+                            .onAppear {
+                                isTagFieldFocused = true
+                                viewModel.isEditingText = true
+                            }
+                            .onDisappear {
+                                viewModel.isEditingText = false
+                            }
                         Button(action: addTag) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
@@ -336,18 +471,57 @@ struct VideoDetailView: View {
     }
 
     private func loadData() async {
+        filmstrip = await thumbnailService.loadFilmstrip(for: video.filePath)
         thumbnail = await thumbnailService.loadThumbnail(for: video.filePath)
         if thumbnail == nil {
             if let url = try? await thumbnailService.generateThumbnail(for: video) {
                 thumbnail = NSImage(contentsOf: url)
             }
         }
+        if filmstrip == nil {
+            filmstrip = try? await thumbnailService.generateFilmstrip(for: video)
+        }
+        if let fs = filmstrip {
+            inferFilmstripGrid(from: fs)
+        }
         tags = viewModel.tagsForVideos(selectedIds)
+    }
+
+    private func inferFilmstripGrid(from image: NSImage) {
+        let cellWidth: CGFloat = 400
+        let cellHeight: CGFloat = 225
+        let cols = max(1, Int(round(image.size.width / cellWidth)))
+        let rows = max(1, Int(round(image.size.height / cellHeight)))
+        filmstripColumns = cols
+        filmstripRows = rows
     }
 
     private var selectedIds: Set<String> {
         let ids = viewModel.selectedVideoIds
         return ids.isEmpty ? [video.id] : ids
+    }
+
+    private var isMultiSelect: Bool {
+        viewModel.selectedVideoIds.count > 1
+    }
+
+    private var selectedVideos: [Video] {
+        let ids = selectedIds
+        return viewModel.filteredVideos.filter { ids.contains($0.id) }
+    }
+
+    private func commonValue<T: Equatable>(_ keyPath: KeyPath<Video, T>) -> T? {
+        let vids = selectedVideos
+        guard let first = vids.first else { return nil }
+        let val = first[keyPath: keyPath]
+        return vids.allSatisfy({ $0[keyPath: keyPath] == val }) ? val : nil
+    }
+
+    private func commonOptionalValue<T: Equatable>(_ keyPath: KeyPath<Video, T?>) -> T?? {
+        let vids = selectedVideos
+        guard let first = vids.first else { return nil }
+        let val = first[keyPath: keyPath]
+        return vids.allSatisfy({ $0[keyPath: keyPath] == val }) ? .some(val) : nil
     }
 
     private func addTag() {

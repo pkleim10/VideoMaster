@@ -1,13 +1,28 @@
 import Foundation
 import GRDB
 
+enum MatchMode: String, Codable, CaseIterable {
+    case all
+    case any
+}
+
 struct VideoCollection: Codable, Identifiable, Equatable, Hashable {
     var id: Int64?
     var name: String
     var dateCreated: Date
+    var matchMode: MatchMode
+
+    init(id: Int64? = nil, name: String, dateCreated: Date, matchMode: MatchMode = .all) {
+        self.id = id
+        self.name = name
+        self.dateCreated = dateCreated
+        self.matchMode = matchMode
+    }
+
+    var listId: String { "collection-\(id ?? 0)" }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, dateCreated
+        case id, name, dateCreated, matchMode
     }
 }
 
@@ -110,7 +125,7 @@ enum RuleAttribute: String, Codable, CaseIterable, Identifiable {
         case .parentFolder: "Folder name"
         case .volume: "Volume name"
         case .fileSize: "Size in MB"
-        case .duration: "Duration in seconds"
+        case .duration: "Duration in minutes"
         case .height: "Pixels"
         case .width: "Pixels"
         case .codec: "h264, hevc, etc."

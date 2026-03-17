@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 enum VideoSort: String, CaseIterable, Identifiable {
     case name
@@ -48,13 +48,57 @@ enum ViewMode: String, CaseIterable {
     case grid, list
 }
 
+enum GridSize: String, CaseIterable {
+    case small, medium, large
+
+    var label: String {
+        switch self {
+        case .small: return "S"
+        case .medium: return "M"
+        case .large: return "L"
+        }
+    }
+
+    var cellWidth: CGFloat {
+        switch self {
+        case .small: return 140
+        case .medium: return 220
+        case .large: return 320
+        }
+    }
+
+    var thumbnailHeight: CGFloat {
+        switch self {
+        case .small: return 80
+        case .medium: return 140
+        case .large: return 220
+        }
+    }
+
+    var gridSpacing: CGFloat {
+        switch self {
+        case .small: return 10
+        case .medium: return 14
+        case .large: return 18
+        }
+    }
+
+    func columns(for availableWidth: CGFloat) -> [GridItem] {
+        let count = max(1, Int((availableWidth + gridSpacing) / (cellWidth + gridSpacing)))
+        let itemWidth = (availableWidth - CGFloat(count - 1) * gridSpacing) / CGFloat(count)
+        return Array(repeating: GridItem(.fixed(itemWidth), spacing: gridSpacing), count: count)
+    }
+}
+
 enum SidebarFilter: Hashable {
     case all
     case recentlyAdded
     case recentlyPlayed
     case topRated
+    case corrupt
     case rating(Int)
     case tag(Tag)
+    case tags
     case collection(VideoCollection)
 }
 
@@ -63,5 +107,6 @@ struct LibraryCounts {
     var recentlyAdded: Int = 0
     var recentlyPlayed: Int = 0
     var topRated: Int = 0
+    var corrupt: Int = 0
     var byRating: [Int: Int] = [:]
 }

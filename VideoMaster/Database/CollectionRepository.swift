@@ -83,6 +83,15 @@ struct CollectionRepository {
 // MARK: - Rule Matching Engine
 
 extension CollectionRepository {
+    func matchesRules(video: Video, rules: [CollectionRule], tags: [Tag], mode: MatchMode) -> Bool {
+        switch mode {
+        case .all:
+            return rules.allSatisfy { rule in matchesRule(video: video, rule: rule, tags: tags) }
+        case .any:
+            return rules.contains { rule in matchesRule(video: video, rule: rule, tags: tags) }
+        }
+    }
+
     func matchesAllRules(video: Video, rules: [CollectionRule], tags: [Tag]) -> Bool {
         rules.allSatisfy { rule in matchesRule(video: video, rule: rule, tags: tags) }
     }
@@ -115,7 +124,7 @@ extension CollectionRepository {
             return compareNumeric(video.fileSize, comparison, bytes)
         case .duration:
             guard let dur = video.duration else { return false }
-            let seconds = Double(value) ?? 0
+            let seconds = (Double(value) ?? 0) * 60
             return compareNumeric(dur, comparison, seconds)
         case .height:
             guard let h = video.height else { return false }

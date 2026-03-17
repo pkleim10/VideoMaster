@@ -21,7 +21,7 @@ struct VideoMasterApp: App {
         }
 
         Settings {
-            SettingsView(dbPool: appState.dbManager.dbPool)
+            SettingsView(dbPool: appState.dbManager.dbPool, viewModel: appState.libraryViewModel)
         }
     }
 }

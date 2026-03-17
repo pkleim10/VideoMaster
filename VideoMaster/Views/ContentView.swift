@@ -36,7 +36,13 @@ struct ContentView: View {
 
                         Picker("View Mode", selection: Binding(
                             get: { vm.viewMode },
-                            set: { vm.viewMode = $0; vm.savePreferences() }
+                            set: { newValue in
+                                vm.viewMode = newValue
+                                vm.savePreferences()
+                                if !vm.selectedVideoIds.isEmpty {
+                                    vm.scrollToSelectedOnViewSwitch = true
+                                }
+                            }
                         )) {
                             Label("Grid", systemImage: "square.grid.2x2")
                                 .tag(ViewMode.grid)
@@ -45,6 +51,18 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 80)
+
+                        Button(action: {
+                            guard let random = vm.filteredVideos.randomElement() else { return }
+                            vm.selectedVideoIds = [random.id]
+                            vm.lastSelectedVideoId = random.id
+                            vm.scrollToVideoId = random.id
+                            vm.pendingAutoPlay = true
+                        }) {
+                            Label("Surprise Me!", systemImage: "exclamationmark.circle.fill")
+                        }
+                        .disabled(vm.filteredVideos.isEmpty)
+                        .help("Play a random video from the current list")
 
                         SortMenuButton(viewModel: vm)
                     }
@@ -56,7 +74,7 @@ struct ContentView: View {
                     }
                 }
             } detail: {
-                if let selectedId = vm.selectedVideoIds.first,
+                if let selectedId = vm.lastSelectedVideoId ?? vm.selectedVideoIds.first,
                    let video = vm.filteredVideos.first(where: { $0.id == selectedId })
                 {
                     VideoDetailView(video: video, viewModel: vm, thumbnailService: thumbService)
@@ -71,24 +89,53 @@ struct ContentView: View {
 
             statusBar
         }
-        .onKeyPress(.space) {
-            guard !vm.isEditingText else { return .ignored }
-            guard !vm.selectedVideoIds.isEmpty else { return .ignored }
-            if vm.isPlayingInline {
-                vm.inlinePlayPauseToggle += 1
-            } else {
-                vm.isPlayingInline = true
-            }
-            return .handled
-        }
         .task {
             vm.startObserving()
         }
         .onAppear {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                if event.keyCode == 53, appState.libraryViewModel.isPlayingInline {
+                let lvm = appState.libraryViewModel
+                // Enter key — start inline rename in list or grid mode
+                if event.keyCode == 36, !lvm.isEditingText {
+                    if (lvm.viewMode == .list || lvm.viewMode == .grid),
+                       lvm.selectedVideoIds.count == 1,
+                       let videoId = lvm.selectedVideoIds.first,
+                       let video = lvm.filteredVideos.first(where: { $0.id == videoId })
+                    {
+                        Task { @MainActor in
+                            lvm.renameText = video.fileName
+                            lvm.renamingVideoId = videoId
+                        }
+                        return nil
+                    }
+                    return event
+                }
+                // Escape key — cancel rename or stop playback
+                if event.keyCode == 53 {
+                    if lvm.renamingVideoId != nil {
+                        Task { @MainActor in
+                            lvm.renamingVideoId = nil
+                            lvm.renameText = ""
+                        }
+                        return nil
+                    }
+                    if lvm.isPlayingInline {
+                        Task { @MainActor in
+                            lvm.isPlayingInline = false
+                        }
+                        return nil
+                    }
+                    return event
+                }
+                // Space key — play/pause
+                if event.keyCode == 49 {
+                    guard !lvm.isEditingText, !lvm.selectedVideoIds.isEmpty else { return event }
                     Task { @MainActor in
-                        appState.libraryViewModel.isPlayingInline = false
+                        if lvm.isPlayingInline {
+                            lvm.inlinePlayPauseToggle += 1
+                        } else {
+                            lvm.isPlayingInline = true
+                        }
                     }
                     return nil
                 }

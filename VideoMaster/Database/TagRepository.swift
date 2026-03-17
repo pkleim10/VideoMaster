@@ -49,6 +49,22 @@ struct TagRepository {
         }
     }
 
+    func rename(_ tagId: Int64, to newName: String) async throws {
+        _ = try await dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE tag SET name = ? WHERE id = ?",
+                arguments: [newName.trimmingCharacters(in: .whitespacesAndNewlines), tagId]
+            )
+        }
+    }
+
+    func delete(_ tagId: Int64) async throws {
+        _ = try await dbPool.write { db in
+            try db.execute(sql: "DELETE FROM video_tag WHERE tagId = ?", arguments: [tagId])
+            try db.execute(sql: "DELETE FROM tag WHERE id = ?", arguments: [tagId])
+        }
+    }
+
     func fetchAllVideoTags() async throws -> [Int64: [Tag]] {
         try await dbPool.read { db in
             let sql = """

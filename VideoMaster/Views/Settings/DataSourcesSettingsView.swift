@@ -15,7 +15,7 @@ struct DataSourcesSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Folders that VideoMaster watches for video files.")
+            Text("Folders that VideoMaster will scan when you import.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)

@@ -4,6 +4,8 @@ import GRDB
 struct Tag: Codable, Identifiable, Equatable, Hashable {
     var id: Int64?
     var name: String
+
+    var listId: String { "tag-\(id ?? 0)" }
 }
 
 extension Tag: FetchableRecord, MutablePersistableRecord {

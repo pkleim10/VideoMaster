@@ -99,6 +99,12 @@ final class DatabaseManager {
             )
         }
 
+        migrator.registerMigration("v4_collectionMatchMode") { db in
+            try db.alter(table: "collection") { t in
+                t.add(column: "matchMode", .text).notNull().defaults(to: "all")
+            }
+        }
+
         try migrator.migrate(dbPool)
     }
 }

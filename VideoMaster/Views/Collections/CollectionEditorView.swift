@@ -9,6 +9,7 @@ struct CollectionEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String = ""
+    @State private var matchMode: MatchMode = .all
     @State private var rules: [EditableRule] = []
 
     struct EditableRule: Identifiable {
@@ -52,9 +53,28 @@ struct CollectionEditorView: View {
 
     private var rulesArea: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Match videos where ALL of the following are true:")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Text("Match videos where")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { matchMode = matchMode == .all ? .any : .all } }) {
+                    Text(matchMode == .all ? "ALL" : "ANY")
+                        .font(.callout)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(matchMode == .all ? Color.accentColor : Color.orange)
+                        )
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+
+                Text("of the following are true:")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
 
             ScrollView {
                 VStack(spacing: 6) {
@@ -64,11 +84,6 @@ struct CollectionEditorView: View {
                 }
             }
             .frame(maxHeight: .infinity)
-
-            Button(action: addRule) {
-                Label("Add Condition", systemImage: "plus.circle")
-            }
-            .buttonStyle(.borderless)
         }
         .padding()
     }
@@ -99,6 +114,12 @@ struct CollectionEditorView: View {
 
             TextField(rules[index].attribute.valuePlaceholder, text: $rules[index].value)
                 .textFieldStyle(.roundedBorder)
+
+            Button(action: addRule) {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            .buttonStyle(.borderless)
 
             Button(action: { removeRule(at: index) }) {
                 Image(systemName: "minus.circle.fill")
@@ -138,6 +159,7 @@ struct CollectionEditorView: View {
             return
         }
         name = existing.name
+        matchMode = existing.matchMode
         Task {
             guard let id = existing.id else { return }
             let dbRules = (try? await repository.fetchRules(for: id)) ?? []
@@ -156,6 +178,7 @@ struct CollectionEditorView: View {
         Task {
             if var existing = collection {
                 existing.name = trimmedName
+                existing.matchMode = matchMode
                 try? await repository.update(existing)
                 if let id = existing.id {
                     let dbRules = rules.map { r in
@@ -169,7 +192,7 @@ struct CollectionEditorView: View {
                     try? await repository.replaceRules(for: id, with: dbRules)
                 }
             } else {
-                let newCollection = VideoCollection(name: trimmedName, dateCreated: Date())
+                let newCollection = VideoCollection(name: trimmedName, dateCreated: Date(), matchMode: matchMode)
                 let saved = try? await repository.insert(newCollection)
                 if let id = saved?.id {
                     let dbRules = rules.map { r in
