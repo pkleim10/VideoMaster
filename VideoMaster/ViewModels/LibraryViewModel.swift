@@ -496,13 +496,9 @@ final class LibraryViewModel {
     }
 
     private func applyFilteredVideos(_ newValue: [Video]) {
-        let oldCount = filteredVideos.count
-        let newCount = newValue.count
-        let oldIds = Set(filteredVideos.map(\.id))
-        let newIds = Set(newValue.map(\.id))
+        let orderChanged = newValue.map(\.id) != filteredVideos.map(\.id)
         filteredVideos = newValue
-        let hasNewItems = !newIds.subtracting(oldIds).isEmpty && newCount > oldCount
-        if hasNewItems {
+        if orderChanged {
             filteredVideosVersion &+= 1
         }
     }
