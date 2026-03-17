@@ -210,7 +210,10 @@ struct LibraryListView: View {
                     filmstripVideo = video
                 }
                 Divider()
-                Button("Delete File", role: .destructive) {
+                Button("Remove from Library") {
+                    Task { await viewModel.removeVideosFromLibrary(ids) }
+                }
+                Button("Delete Video…", role: .destructive) {
                     if viewModel.confirmDeletions {
                         pendingDeleteIds = ids
                         showDeleteConfirmation = true
@@ -230,13 +233,15 @@ struct LibraryListView: View {
         .sheet(item: $filmstripVideo) { video in
             FilmstripConfigView(
                 video: video,
-                thumbnailService: thumbnailService
+                thumbnailService: thumbnailService,
+                defaultRows: viewModel.defaultFilmstripRows,
+                defaultColumns: viewModel.defaultFilmstripColumns
             ) { _ in
                 viewModel.filmstripRefreshId &+= 1
             }
         }
         .confirmationDialog(
-            "Delete \(pendingDeleteIds.count == 1 ? "File" : "\(pendingDeleteIds.count) Files")",
+            "Delete \(pendingDeleteIds.count == 1 ? "Video" : "\(pendingDeleteIds.count) Videos")",
             isPresented: $showDeleteConfirmation,
             titleVisibility: .visible
         ) {

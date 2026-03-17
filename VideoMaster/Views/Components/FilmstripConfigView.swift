@@ -3,6 +3,8 @@ import SwiftUI
 struct FilmstripConfigView: View {
     let video: Video
     let thumbnailService: ThumbnailService
+    var defaultRows: Int = 2
+    var defaultColumns: Int = 4
     let onComplete: (NSImage) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -24,31 +26,8 @@ struct FilmstripConfigView: View {
                 .lineLimit(1)
 
             HStack(spacing: 24) {
-                VStack(spacing: 6) {
-                    Text("Rows")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Stepper(value: $rows, in: 1...6) {
-                        Text("\(rows)")
-                            .font(.title3)
-                            .fontWeight(.medium)
-                            .monospacedDigit()
-                            .frame(width: 30, alignment: .center)
-                    }
-                }
-
-                VStack(spacing: 6) {
-                    Text("Columns")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Stepper(value: $columns, in: 1...8) {
-                        Text("\(columns)")
-                            .font(.title3)
-                            .fontWeight(.medium)
-                            .monospacedDigit()
-                            .frame(width: 30, alignment: .center)
-                    }
-                }
+                compactStepper("Rows", value: $rows, range: 1...6)
+                compactStepper("Columns", value: $columns, range: 1...8)
             }
 
             Text("\(totalFrames) frames")
@@ -71,6 +50,43 @@ struct FilmstripConfigView: View {
         }
         .padding(20)
         .frame(width: 300)
+        .onAppear {
+            rows = defaultRows
+            columns = defaultColumns
+        }
+    }
+
+    private func compactStepper(_ label: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        VStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 0) {
+                Button {
+                    if value.wrappedValue > range.lowerBound { value.wrappedValue -= 1 }
+                } label: {
+                    Image(systemName: "minus")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .disabled(value.wrappedValue <= range.lowerBound)
+
+                Text("\(value.wrappedValue)")
+                    .font(.title3)
+                    .fontWeight(.medium)
+                    .monospacedDigit()
+                    .frame(width: 30, alignment: .center)
+
+                Button {
+                    if value.wrappedValue < range.upperBound { value.wrappedValue += 1 }
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .disabled(value.wrappedValue >= range.upperBound)
+            }
+        }
     }
 
     private func generate() {

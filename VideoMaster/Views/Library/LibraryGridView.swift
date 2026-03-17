@@ -60,6 +60,9 @@ struct LibraryGridView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
     @State private var lastClickedIndex: Int?
+    @State private var pendingDeleteIds: Set<String> = []
+    @State private var showDeleteConfirmation = false
+    @State private var filmstripVideo: Video?
     @FocusState private var isRenameFocused: Bool
 
     var body: some View {
@@ -123,6 +126,36 @@ struct LibraryGridView: View {
                 DispatchQueue.main.async {
                     isRenameFocused = true
                 }
+            }
+        }
+        .sheet(item: $filmstripVideo) { video in
+            FilmstripConfigView(
+                video: video,
+                thumbnailService: thumbnailService,
+                defaultRows: viewModel.defaultFilmstripRows,
+                defaultColumns: viewModel.defaultFilmstripColumns
+            ) { _ in
+                viewModel.filmstripRefreshId &+= 1
+            }
+        }
+        .confirmationDialog(
+            "Delete \(pendingDeleteIds.count == 1 ? "Video" : "\(pendingDeleteIds.count) Videos")",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                let ids = pendingDeleteIds
+                pendingDeleteIds = []
+                Task { await viewModel.deleteVideos(ids) }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteIds = []
+            }
+        } message: {
+            if pendingDeleteIds.count == 1 {
+                Text("This will permanently delete the file from disk. This action cannot be undone.")
+            } else {
+                Text("This will permanently delete \(pendingDeleteIds.count) files from disk. This action cannot be undone.")
             }
         }
     }
@@ -199,10 +232,34 @@ struct LibraryGridView: View {
         Button("Show in Finder") {
             NSWorkspace.shared.selectFile(video.filePath, inFileViewerRootedAtPath: "")
         }
+        Menu("Open With") {
+            let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: video.url)
+            ForEach(appURLs, id: \.self) { appURL in
+                Button(appURL.deletingPathExtension().lastPathComponent) {
+                    NSWorkspace.shared.open(
+                        [video.url],
+                        withApplicationAt: appURL,
+                        configuration: NSWorkspace.OpenConfiguration()
+                    )
+                    Task { await viewModel.recordPlay(for: video) }
+                }
+            }
+        }
         Divider()
-        Button("Remove from Library", role: .destructive) {
-            Task {
-                await viewModel.deleteVideos([video.id])
+        Button("Modify Filmstrip...") {
+            filmstripVideo = video
+        }
+        Divider()
+        Button("Remove from Library") {
+            Task { await viewModel.removeVideosFromLibrary([video.id]) }
+        }
+        Button("Delete Video…", role: .destructive) {
+            let ids: Set<String> = [video.id]
+            if viewModel.confirmDeletions {
+                pendingDeleteIds = ids
+                showDeleteConfirmation = true
+            } else {
+                Task { await viewModel.deleteVideos(ids) }
             }
         }
     }

@@ -4,22 +4,33 @@ import GRDB
 @MainActor
 @Observable
 final class AppState {
-    let dbManager: DatabaseManager
-    let libraryViewModel: LibraryViewModel
+    let dbManager: DatabaseManager?
+    let libraryViewModel: LibraryViewModel?
     let thumbnailService: ThumbnailService
 
+    var hasLibrary: Bool { dbManager != nil }
+
     init() {
+        thumbnailService = ThumbnailService()
+        var db: DatabaseManager?
+        var vm: LibraryViewModel?
         do {
-            let db = try DatabaseManager()
-            let thumbService = ThumbnailService()
-            self.dbManager = db
-            self.thumbnailService = thumbService
-            self.libraryViewModel = LibraryViewModel(
-                dbPool: db.dbPool,
-                thumbnailService: thumbService
-            )
+            _ = try DatabaseExportImport.prepareDatabaseForLaunch()
+            let userClosed = DatabaseExportImport.userClosedLibrary
+            DatabaseExportImport.clearUserClosedLibrary()
+            if !userClosed, let path = DatabaseExportImport.databasePathForLaunch() {
+                let manager = try DatabaseManager(path: path)
+                db = manager
+                vm = LibraryViewModel(
+                    dbPool: manager.dbPool,
+                    thumbnailService: thumbnailService
+                )
+            }
         } catch {
-            fatalError("Failed to initialize database: \(error)")
+            // File deleted, corrupted, or no library — show landing
         }
+        dbManager = db
+        libraryViewModel = vm
+        DatabaseExportImport.activeDbPool = db?.dbPool
     }
 }

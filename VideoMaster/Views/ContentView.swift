@@ -5,9 +5,21 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        let vm = appState.libraryViewModel
-        let thumbService = appState.thumbnailService
+        if !appState.hasLibrary {
+            LandingView()
+                .frame(minWidth: 900, minHeight: 600)
+        } else if let vm = appState.libraryViewModel {
+            LibraryContentView(vm: vm, thumbService: appState.thumbnailService)
+        }
+    }
+}
 
+private struct LibraryContentView: View {
+    let vm: LibraryViewModel
+    let thumbService: ThumbnailService
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
+    var body: some View {
         @Bindable var bindableVM = vm
 
         VStack(spacing: 0) {
@@ -86,15 +98,16 @@ struct ContentView: View {
                 }
             }
             .navigationSplitViewStyle(.balanced)
+            .navigationTitle("VideoMaster — \(DatabaseExportImport.activeLibraryDisplayName)")
 
-            statusBar
+            statusBar(vm: vm)
         }
         .task {
             vm.startObserving()
         }
         .onAppear {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                let lvm = appState.libraryViewModel
+                let lvm = vm
                 // Enter key — start inline rename in list or grid mode
                 if event.keyCode == 36, !lvm.isEditingText {
                     if (lvm.viewMode == .list || lvm.viewMode == .grid),
@@ -155,7 +168,7 @@ struct ContentView: View {
             Text("Add a folder to scan for video files")
                 .foregroundStyle(.tertiary)
             Button("Add Folder") {
-                appState.libraryViewModel.showFolderPicker()
+                vm.showFolderPicker()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -163,8 +176,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var statusBar: some View {
-        let vm = appState.libraryViewModel
+    private func statusBar(vm: LibraryViewModel) -> some View {
         let itemCount = vm.filteredVideos.count
         let selectedCount = vm.selectedVideoIds.count
 
@@ -205,3 +217,4 @@ struct ContentView: View {
         .background(.bar)
     }
 }
+

@@ -3,7 +3,7 @@ import SwiftUI
 
 struct VideoDetailView: View {
     let video: Video
-    let viewModel: LibraryViewModel
+    @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
     @State private var tags: [Tag] = []
     @State private var newTagName: String = ""
@@ -29,10 +29,25 @@ struct VideoDetailView: View {
             let thumbnailHeight = max(100, totalHeight - clampedDetailHeight - handleHeight)
 
             VStack(spacing: 0) {
-                thumbnailSection(maxHeight: thumbnailHeight)
-                    .frame(height: thumbnailHeight)
-                    .padding(.horizontal)
-                    .padding(.top)
+                VStack(spacing: 0) {
+                    if !viewModel.isPlayingInline, (thumbnail != nil || filmstrip != nil) {
+                        Picker("", selection: $viewModel.showThumbnailInDetail) {
+                            Text("Thumbnail").tag(true)
+                            Text("Filmstrip").tag(false)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 160)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                    }
+
+                    thumbnailSection(maxHeight: thumbnailHeight)
+                        .frame(maxHeight: .infinity)
+                        .padding(.horizontal)
+                        .padding(.top, 4)
+                }
+                .frame(height: thumbnailHeight)
 
                 resizeHandle(totalHeight: totalHeight)
 
@@ -71,6 +86,26 @@ struct VideoDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private func filmstripImage(_ filmstrip: NSImage) -> some View {
+        Image(nsImage: filmstrip)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .onHover { hovering in
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+            .overlay {
+                GeometryReader { imgGeo in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            handleFilmstripClick(at: location, in: imgGeo.size)
+                        }
+                }
+            }
+    }
+
     private func resizeHandle(totalHeight: CGFloat) -> some View {
         Rectangle()
             .fill(Color.clear)
@@ -96,47 +131,36 @@ struct VideoDetailView: View {
     // MARK: - Thumbnail + Inline Player
 
     private func thumbnailSection(maxHeight: CGFloat) -> some View {
-        ZStack {
-            if viewModel.isPlayingInline, let player = inlinePlayer {
-                FloatingPlayerView(player: player)
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else if let filmstrip {
-                Image(nsImage: filmstrip)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .onHover { hovering in
-                        if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                    }
-                    .overlay {
-                        GeometryReader { imgGeo in
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture { location in
-                                    handleFilmstripClick(
-                                        at: location,
-                                        in: imgGeo.size
-                                    )
-                                }
+        let preferThumbnail = viewModel.showThumbnailInDetail
+
+        return ZStack {
+                if viewModel.isPlayingInline, let player = inlinePlayer {
+                    FloatingPlayerView(player: player)
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else if preferThumbnail, let thumbnail {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else if let filmstrip {
+                    filmstripImage(filmstrip)
+                } else if let thumbnail {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.1))
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            Image(systemName: "film")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.secondary)
                         }
-                    }
-            } else if let thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.1))
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay {
-                        Image(systemName: "film")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.secondary)
-                    }
-            }
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: maxHeight)
         .onChange(of: viewModel.isPlayingInline) { _, isPlaying in
@@ -479,7 +503,11 @@ struct VideoDetailView: View {
             }
         }
         if filmstrip == nil {
-            filmstrip = try? await thumbnailService.generateFilmstrip(for: video)
+            filmstrip = try? await thumbnailService.generateFilmstrip(
+                for: video,
+                rows: viewModel.defaultFilmstripRows,
+                columns: viewModel.defaultFilmstripColumns
+            )
         }
         if let fs = filmstrip {
             inferFilmstripGrid(from: fs)

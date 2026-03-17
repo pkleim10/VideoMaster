@@ -111,9 +111,12 @@ final class LibraryViewModel {
     private static let sortAscendingKey = "VideoMaster.sortAscending"
     private static let excludeCorruptKey = "VideoMaster.excludeCorrupt"
     private static let confirmDeletionsKey = "VideoMaster.confirmDeletions"
+    private static let showThumbnailInDetailKey = "VideoMaster.showThumbnailInDetail"
     private static let detailHeightKey = "VideoMaster.detailHeight"
     private static let sidebarExpandedKey = "VideoMaster.sidebarExpanded"
     private static let columnCustomizationKey = "VideoMaster.columnCustomization"
+    private static let filmstripRowsKey = "VideoMaster.filmstripRows"
+    private static let filmstripColumnsKey = "VideoMaster.filmstripColumns"
 
     var excludeCorrupt: Bool = false {
         didSet {
@@ -127,6 +130,24 @@ final class LibraryViewModel {
     var confirmDeletions: Bool = true {
         didSet {
             UserDefaults.standard.set(confirmDeletions, forKey: Self.confirmDeletionsKey)
+        }
+    }
+
+    var defaultFilmstripRows: Int = 2 {
+        didSet {
+            UserDefaults.standard.set(defaultFilmstripRows, forKey: Self.filmstripRowsKey)
+        }
+    }
+
+    var defaultFilmstripColumns: Int = 4 {
+        didSet {
+            UserDefaults.standard.set(defaultFilmstripColumns, forKey: Self.filmstripColumnsKey)
+        }
+    }
+
+    var showThumbnailInDetail: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showThumbnailInDetail, forKey: Self.showThumbnailInDetailKey)
         }
     }
 
@@ -191,6 +212,15 @@ final class LibraryViewModel {
         }
         excludeCorrupt = defaults.bool(forKey: Self.excludeCorruptKey)
         confirmDeletions = defaults.object(forKey: Self.confirmDeletionsKey) as? Bool ?? true
+        if let rows = defaults.object(forKey: Self.filmstripRowsKey) as? Int, rows > 0 {
+            defaultFilmstripRows = rows
+        }
+        if let cols = defaults.object(forKey: Self.filmstripColumnsKey) as? Int, cols > 0 {
+            defaultFilmstripColumns = cols
+        }
+        if defaults.object(forKey: Self.showThumbnailInDetailKey) != nil {
+            showThumbnailInDetail = defaults.bool(forKey: Self.showThumbnailInDetailKey)
+        }
 
         if let h = defaults.object(forKey: Self.detailHeightKey) as? Double, h > 0 {
             detailHeight = CGFloat(h)
@@ -547,6 +577,15 @@ final class LibraryViewModel {
             if let video = videos.first(where: { $0.filePath == filePath }) {
                 try? await videoRepo.delete(video)
                 try? FileManager.default.removeItem(at: video.url)
+            }
+        }
+        selectedVideoIds.subtract(ids)
+    }
+
+    func removeVideosFromLibrary(_ ids: Set<String>) async {
+        for filePath in ids {
+            if let video = videos.first(where: { $0.filePath == filePath }) {
+                try? await videoRepo.delete(video)
             }
         }
         selectedVideoIds.subtract(ids)
