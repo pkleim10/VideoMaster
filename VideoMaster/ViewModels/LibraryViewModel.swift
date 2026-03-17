@@ -24,10 +24,16 @@ final class LibraryViewModel {
         }
     }
     var searchText: String = "" {
-        didSet { recomputeFilteredVideos() }
+        didSet { debouncedSearch() }
     }
     var tableSortOrder: [KeyPathComparator<Video>] = [KeyPathComparator(\Video.dateAdded, order: .reverse)] {
-        didSet { recomputeFilteredVideos() }
+        didSet {
+            let oldSort = VideoSort.from(keyPath: oldValue.first?.keyPath ?? \Video.dateAdded)
+            let newSort = VideoSort.from(keyPath: tableSortOrder.first?.keyPath ?? \Video.dateAdded)
+            guard oldSort != newSort || oldValue.first?.order != tableSortOrder.first?.order else { return }
+            recomputeFilteredVideos()
+            savePreferences()
+        }
     }
     var viewMode: ViewMode = .grid
     var gridSize: GridSize = .medium
@@ -82,6 +88,10 @@ final class LibraryViewModel {
     var libraryCounts = LibraryCounts()
     private var cachedCollectionRules: [Int64: [CollectionRule]] = [:]
     private var collectionCountTask: Task<Void, Never>?
+    private var searchTask: Task<Void, Never>?
+    private var ftsMatchIds: Set<String>?
+    private var duplicateVideoIds: Set<String> = []
+    private var isRecomputingFilter = false
 
     let dbPool: DatabasePool
     let videoRepo: VideoRepository
@@ -117,6 +127,15 @@ final class LibraryViewModel {
     private static let columnCustomizationKey = "VideoMaster.columnCustomization"
     private static let filmstripRowsKey = "VideoMaster.filmstripRows"
     private static let filmstripColumnsKey = "VideoMaster.filmstripColumns"
+    private static let surpriseMeAutoPlaysKey = "VideoMaster.surpriseMeAutoPlays"
+    private static let recentlyAddedDaysKey = "VideoMaster.recentlyAddedDays"
+    private static let recentlyPlayedDaysKey = "VideoMaster.recentlyPlayedDays"
+    private static let topRatedMinRatingKey = "VideoMaster.topRatedMinRating"
+    private static let showRecentlyAddedKey = "VideoMaster.showRecentlyAdded"
+    private static let showRecentlyPlayedKey = "VideoMaster.showRecentlyPlayed"
+    private static let showTopRatedKey = "VideoMaster.showTopRated"
+    private static let showDuplicatesKey = "VideoMaster.showDuplicates"
+    private static let showCorruptKey = "VideoMaster.showCorrupt"
 
     var excludeCorrupt: Bool = false {
         didSet {
@@ -130,6 +149,84 @@ final class LibraryViewModel {
     var confirmDeletions: Bool = true {
         didSet {
             UserDefaults.standard.set(confirmDeletions, forKey: Self.confirmDeletionsKey)
+        }
+    }
+
+    var recentlyAddedDays: Int = 7 {
+        didSet {
+            UserDefaults.standard.set(recentlyAddedDays, forKey: Self.recentlyAddedDaysKey)
+            updateLibraryCounts()
+            recomputeFilteredVideos()
+        }
+    }
+
+    var recentlyPlayedDays: Int = 30 {
+        didSet {
+            UserDefaults.standard.set(recentlyPlayedDays, forKey: Self.recentlyPlayedDaysKey)
+            updateLibraryCounts()
+            recomputeFilteredVideos()
+        }
+    }
+
+    var topRatedMinRating: Int = 4 {
+        didSet {
+            UserDefaults.standard.set(topRatedMinRating, forKey: Self.topRatedMinRatingKey)
+            updateLibraryCounts()
+            recomputeFilteredVideos()
+        }
+    }
+
+    var showRecentlyAdded: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showRecentlyAdded, forKey: Self.showRecentlyAddedKey)
+            resetFilterIfHidden()
+        }
+    }
+
+    var showRecentlyPlayed: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showRecentlyPlayed, forKey: Self.showRecentlyPlayedKey)
+            resetFilterIfHidden()
+        }
+    }
+
+    var showTopRated: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showTopRated, forKey: Self.showTopRatedKey)
+            resetFilterIfHidden()
+        }
+    }
+
+    var showDuplicates: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showDuplicates, forKey: Self.showDuplicatesKey)
+            resetFilterIfHidden()
+        }
+    }
+
+    var showCorrupt: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showCorrupt, forKey: Self.showCorruptKey)
+            resetFilterIfHidden()
+        }
+    }
+
+    private func resetFilterIfHidden() {
+        switch sidebarFilter {
+        case .recentlyAdded where !showRecentlyAdded,
+             .recentlyPlayed where !showRecentlyPlayed,
+             .topRated where !showTopRated,
+             .duplicates where !showDuplicates,
+             .corrupt where !showCorrupt:
+            sidebarFilter = .all
+        default:
+            break
+        }
+    }
+
+    var surpriseMeAutoPlays: Bool = true {
+        didSet {
+            UserDefaults.standard.set(surpriseMeAutoPlays, forKey: Self.surpriseMeAutoPlaysKey)
         }
     }
 
@@ -212,12 +309,27 @@ final class LibraryViewModel {
         }
         excludeCorrupt = defaults.bool(forKey: Self.excludeCorruptKey)
         confirmDeletions = defaults.object(forKey: Self.confirmDeletionsKey) as? Bool ?? true
+        surpriseMeAutoPlays = defaults.object(forKey: Self.surpriseMeAutoPlaysKey) as? Bool ?? true
         if let rows = defaults.object(forKey: Self.filmstripRowsKey) as? Int, rows > 0 {
             defaultFilmstripRows = rows
         }
         if let cols = defaults.object(forKey: Self.filmstripColumnsKey) as? Int, cols > 0 {
             defaultFilmstripColumns = cols
         }
+        if let days = defaults.object(forKey: Self.recentlyAddedDaysKey) as? Int, days > 0 {
+            recentlyAddedDays = days
+        }
+        if let days = defaults.object(forKey: Self.recentlyPlayedDaysKey) as? Int, days > 0 {
+            recentlyPlayedDays = days
+        }
+        if let rating = defaults.object(forKey: Self.topRatedMinRatingKey) as? Int, rating >= 1 {
+            topRatedMinRating = rating
+        }
+        if let v = defaults.object(forKey: Self.showRecentlyAddedKey) as? Bool { showRecentlyAdded = v }
+        if let v = defaults.object(forKey: Self.showRecentlyPlayedKey) as? Bool { showRecentlyPlayed = v }
+        if let v = defaults.object(forKey: Self.showTopRatedKey) as? Bool { showTopRated = v }
+        if let v = defaults.object(forKey: Self.showDuplicatesKey) as? Bool { showDuplicates = v }
+        if let v = defaults.object(forKey: Self.showCorruptKey) as? Bool { showCorrupt = v }
         if defaults.object(forKey: Self.showThumbnailInDetailKey) != nil {
             showThumbnailInDetail = defaults.bool(forKey: Self.showThumbnailInDetailKey)
         }
@@ -267,6 +379,31 @@ final class LibraryViewModel {
         observationTask = nil
     }
 
+    // MARK: - FTS5 Search
+
+    private func debouncedSearch() {
+        searchTask?.cancel()
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            ftsMatchIds = nil
+            recomputeFilteredVideos()
+            return
+        }
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            do {
+                let results = try await videoRepo.search(trimmed)
+                guard !Task.isCancelled else { return }
+                ftsMatchIds = Set(results.map(\.id))
+            } catch {
+                guard !Task.isCancelled else { return }
+                ftsMatchIds = nil
+            }
+            recomputeFilteredVideos()
+        }
+    }
+
     // MARK: - Cached Filter/Sort
 
     private static func isCorrupt(_ video: Video) -> Bool {
@@ -274,6 +411,10 @@ final class LibraryViewModel {
     }
 
     private func recomputeFilteredVideos() {
+        guard !isRecomputingFilter else { return }
+        isRecomputingFilter = true
+        defer { isRecomputingFilter = false }
+
         var result = videos
 
         let isSearching = !searchText.isEmpty
@@ -283,22 +424,24 @@ final class LibraryViewModel {
             result = result.filter { !Self.isCorrupt($0) }
         }
 
-        if isSearching {
-            let query = searchText.lowercased()
-            result = result.filter { $0.fileName.lowercased().contains(query) }
+        if isSearching, let matchIds = ftsMatchIds {
+            result = result.filter { matchIds.contains($0.id) }
         }
 
         switch sidebarFilter {
         case .recentlyAdded:
-            let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+            let cutoff = Calendar.current.date(byAdding: .day, value: -recentlyAddedDays, to: Date()) ?? Date()
             result = result.filter { $0.dateAdded >= cutoff }
         case .recentlyPlayed:
-            result = result.filter { $0.lastPlayed != nil }
+            let cutoff = Calendar.current.date(byAdding: .day, value: -recentlyPlayedDays, to: Date()) ?? Date()
+            result = result.filter { ($0.lastPlayed ?? .distantPast) >= cutoff }
                 .sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
             applyFilteredVideos(result)
             return
         case .topRated:
-            result = result.filter { $0.rating >= 4 }
+            result = result.filter { $0.rating >= topRatedMinRating }
+        case .duplicates:
+            result = result.filter { duplicateVideoIds.contains($0.id) }
         case .corrupt:
             result = result.filter { Self.isCorrupt($0) }
         case .rating(let stars):
@@ -373,26 +516,42 @@ final class LibraryViewModel {
         var topRated = 0
         var corrupt = 0
         var byRating: [Int: Int] = [:]
-        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let addedCutoff = Calendar.current.date(byAdding: .day, value: -recentlyAddedDays, to: Date()) ?? Date()
+        let playedCutoff = Calendar.current.date(byAdding: .day, value: -recentlyPlayedDays, to: Date()) ?? Date()
+
+        typealias DupKey = String
+        var buckets: [DupKey: [String]] = [:]
         for video in videos {
             let isCorrupt = Self.isCorrupt(video)
             if isCorrupt { corrupt += 1 }
             let skip = excludeCorrupt && isCorrupt
             if !skip {
                 allCount += 1
-                if video.dateAdded >= cutoff { recentlyAdded += 1 }
-                if video.lastPlayed != nil { recentlyPlayed += 1 }
-                if video.rating >= 4 { topRated += 1 }
+                if video.dateAdded >= addedCutoff { recentlyAdded += 1 }
+                if (video.lastPlayed ?? .distantPast) >= playedCutoff { recentlyPlayed += 1 }
+                if video.rating >= topRatedMinRating { topRated += 1 }
                 if video.rating > 0 {
                     byRating[video.rating, default: 0] += 1
                 }
+                if let duration = video.duration {
+                    let key = "\(video.fileSize)_\(Int(duration))"
+                    buckets[key, default: []].append(video.id)
+                }
             }
         }
+
+        var dupIds = Set<String>()
+        for ids in buckets.values where ids.count > 1 {
+            dupIds.formUnion(ids)
+        }
+        duplicateVideoIds = dupIds
+
         libraryCounts = LibraryCounts(
             all: allCount,
             recentlyAdded: recentlyAdded,
             recentlyPlayed: recentlyPlayed,
             topRated: topRated,
+            duplicates: dupIds.count,
             corrupt: corrupt,
             byRating: byRating
         )

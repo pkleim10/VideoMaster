@@ -47,10 +47,78 @@ struct LibrarySettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 2)
+
+            Divider()
+                .padding(.vertical, 4)
+
+            Section("Sidebar Filters") {
+                filterRow(
+                    title: "Recently Added",
+                    isOn: $viewModel.showRecentlyAdded
+                ) {
+                    daysField(value: $viewModel.recentlyAddedDays)
+                        .disabled(!viewModel.showRecentlyAdded)
+                    Text("days")
+                        .foregroundStyle(viewModel.showRecentlyAdded ? .secondary : .tertiary)
+                }
+
+                filterRow(
+                    title: "Recently Played",
+                    isOn: $viewModel.showRecentlyPlayed
+                ) {
+                    daysField(value: $viewModel.recentlyPlayedDays)
+                        .disabled(!viewModel.showRecentlyPlayed)
+                    Text("days")
+                        .foregroundStyle(viewModel.showRecentlyPlayed ? .secondary : .tertiary)
+                }
+
+                filterRow(
+                    title: "Top Rated",
+                    isOn: $viewModel.showTopRated
+                ) {
+                    RatingView(rating: viewModel.topRatedMinRating, size: 14) { newRating in
+                        viewModel.topRatedMinRating = max(newRating, 1)
+                    }
+                    .disabled(!viewModel.showTopRated)
+                    .opacity(viewModel.showTopRated ? 1 : 0.4)
+                }
+
+                filterRow(title: "Duplicates", isOn: $viewModel.showDuplicates)
+
+                filterRow(title: "Corrupt", isOn: $viewModel.showCorrupt)
+            }
         }
         .formStyle(.grouped)
         .padding()
     }
+
+    private func filterRow<C: View>(
+        title: String,
+        isOn: Binding<Bool>,
+        @ViewBuilder config: () -> C
+    ) -> some View {
+        HStack {
+            Toggle(title, isOn: isOn)
+            Spacer()
+            config()
+        }
+    }
+
+    private func filterRow(title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(title, isOn: isOn)
+    }
+
+    private func daysField(value: Binding<Int>) -> some View {
+        TextField("", value: value, format: .number)
+            .frame(width: 50)
+            .multilineTextAlignment(.trailing)
+            .textFieldStyle(.roundedBorder)
+            .onChange(of: value.wrappedValue) { _, newVal in
+                if newVal < 1 { value.wrappedValue = 1 }
+                if newVal > 365 { value.wrappedValue = 365 }
+            }
+    }
+
 }
 
 struct VideoSettingsView: View {
@@ -67,12 +135,21 @@ struct VideoSettingsView: View {
                 Text("\(viewModel.defaultFilmstripRows * viewModel.defaultFilmstripColumns) frames per filmstrip")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Text("This sets the default grid size when generating new filmstrips. You can override it per video using Modify Filmstrip.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
             }
 
-            Text("This sets the default grid size when generating new filmstrips. You can override it per video using Modify Filmstrip.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
+            Section {
+                Toggle("Surprise Me! auto-plays selected video", isOn: $viewModel.surpriseMeAutoPlays)
+
+                Text("When enabled, clicking Surprise Me! will immediately start playing the randomly selected video. When disabled, the video is selected and scrolled to but not played.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
         }
         .formStyle(.grouped)
         .padding()

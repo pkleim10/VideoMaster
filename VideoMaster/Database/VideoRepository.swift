@@ -13,7 +13,9 @@ struct VideoRepository {
     func search(_ query: String) async throws -> [Video] {
         try await dbPool.read { db in
             if query.isEmpty { return try Video.fetchAll(db) }
-            guard let pattern = FTS5Pattern(matchingAnyTokenIn: query) else { return [] }
+            guard let pattern = FTS5Pattern(matchingAnyTokenIn: query) else {
+                return try Video.fetchAll(db)
+            }
             let sql = """
                 SELECT video.* FROM video
                 JOIN video_fts ON video_fts.rowid = video.id AND video_fts MATCH ?

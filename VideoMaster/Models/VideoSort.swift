@@ -95,6 +95,7 @@ enum SidebarFilter: Hashable {
     case recentlyAdded
     case recentlyPlayed
     case topRated
+    case duplicates
     case corrupt
     case rating(Int)
     case tag(Tag)
@@ -107,6 +108,7 @@ struct LibraryCounts {
     var recentlyAdded: Int = 0
     var recentlyPlayed: Int = 0
     var topRated: Int = 0
+    var duplicates: Int = 0
     var corrupt: Int = 0
     var byRating: [Int: Int] = [:]
 }

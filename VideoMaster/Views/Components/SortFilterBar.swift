@@ -16,14 +16,11 @@ struct SortMenuButton: View {
         Menu {
             ForEach(VideoSort.allCases) { sort in
                 Button {
-                    withAnimation(nil) {
-                        if currentSort == sort {
-                            viewModel.tableSortOrder = sort.comparators(ascending: !isAscending)
-                        } else {
-                            viewModel.tableSortOrder = sort.comparators(ascending: true)
-                        }
+                    if currentSort == sort {
+                        viewModel.tableSortOrder = sort.comparators(ascending: !isAscending)
+                    } else {
+                        viewModel.tableSortOrder = sort.comparators(ascending: true)
                     }
-                    viewModel.savePreferences()
                 } label: {
                     HStack {
                         Text(sort.displayName)

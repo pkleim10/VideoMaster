@@ -69,7 +69,7 @@ private struct LibraryContentView: View {
                             vm.selectedVideoIds = [random.id]
                             vm.lastSelectedVideoId = random.id
                             vm.scrollToVideoId = random.id
-                            vm.pendingAutoPlay = true
+                            vm.pendingAutoPlay = vm.surpriseMeAutoPlays
                         }) {
                             Label("Surprise Me!", systemImage: "exclamationmark.circle.fill")
                         }

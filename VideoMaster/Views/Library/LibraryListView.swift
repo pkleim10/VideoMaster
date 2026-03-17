@@ -58,28 +58,13 @@ struct LibraryListView: View {
     @State private var showDeleteConfirmation = false
     @FocusState private var isRenameFocused: Bool
     @State private var scrollToRow: Int?
+    @State private var thumbnailPopoverVideoId: String?
 
     var body: some View {
         Table(
             viewModel.filteredVideos,
             selection: $viewModel.selectedVideoIds,
-            sortOrder: Binding<[KeyPathComparator<Video>]>(
-                get: { viewModel.tableSortOrder },
-                set: { newValue in
-                    let oldSort = VideoSort.from(keyPath: viewModel.tableSortOrder.first?.keyPath ?? \Video.dateAdded)
-                    let newSort = VideoSort.from(keyPath: newValue.first?.keyPath ?? \Video.dateAdded)
-                    let resolved: [KeyPathComparator<Video>]
-                    if oldSort != newSort {
-                        resolved = newSort.comparators(ascending: true)
-                    } else {
-                        resolved = newValue
-                    }
-                    withAnimation(nil) {
-                        viewModel.tableSortOrder = resolved
-                    }
-                    viewModel.savePreferences()
-                }
-            ),
+            sortOrder: $viewModel.tableSortOrder,
             columnCustomization: $viewModel.columnCustomization
         ) {
             TableColumn("Name", value: \.fileName) { video in
@@ -89,6 +74,22 @@ struct LibraryListView: View {
                     )
                     .frame(width: 56, height: 36)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .onHover { hovering in
+                        thumbnailPopoverVideoId = hovering ? video.id : nil
+                    }
+                    .popover(
+                        isPresented: Binding(
+                            get: { thumbnailPopoverVideoId == video.id },
+                            set: { if !$0 { thumbnailPopoverVideoId = nil } }
+                        ),
+                        arrowEdge: .trailing
+                    ) {
+                        AsyncThumbnailView(
+                            filePath: video.filePath, thumbnailService: thumbnailService
+                        )
+                        .frame(width: 224, height: 144)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
 
                     if viewModel.renamingVideoId == video.id {
                         TextField("", text: $viewModel.renameText)

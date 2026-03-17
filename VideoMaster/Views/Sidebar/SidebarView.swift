@@ -24,14 +24,26 @@ struct SidebarView: View {
             if viewModel.isLibraryExpanded {
                 sidebarRow("All Videos", icon: "film.stack", count: viewModel.libraryCounts.all)
                     .tag(SidebarFilter.all)
-                sidebarRow("Recently Added", icon: "clock", count: viewModel.libraryCounts.recentlyAdded)
-                    .tag(SidebarFilter.recentlyAdded)
-                sidebarRow("Recently Played", icon: "play.circle", count: viewModel.libraryCounts.recentlyPlayed)
-                    .tag(SidebarFilter.recentlyPlayed)
-                sidebarRow("Top Rated", icon: "star.fill", count: viewModel.libraryCounts.topRated)
-                    .tag(SidebarFilter.topRated)
-                sidebarRow("Corrupt", icon: "exclamationmark.triangle", count: viewModel.libraryCounts.corrupt)
-                    .tag(SidebarFilter.corrupt)
+                if viewModel.showRecentlyAdded {
+                    sidebarRow("Recently Added", icon: "clock", count: viewModel.libraryCounts.recentlyAdded)
+                        .tag(SidebarFilter.recentlyAdded)
+                }
+                if viewModel.showRecentlyPlayed {
+                    sidebarRow("Recently Played", icon: "play.circle", count: viewModel.libraryCounts.recentlyPlayed)
+                        .tag(SidebarFilter.recentlyPlayed)
+                }
+                if viewModel.showTopRated {
+                    sidebarRow("Top Rated", icon: "star.fill", count: viewModel.libraryCounts.topRated)
+                        .tag(SidebarFilter.topRated)
+                }
+                if viewModel.showDuplicates {
+                    sidebarRow("Duplicates", icon: "doc.on.doc", count: viewModel.libraryCounts.duplicates)
+                        .tag(SidebarFilter.duplicates)
+                }
+                if viewModel.showCorrupt {
+                    sidebarRow("Corrupt", icon: "exclamationmark.triangle", count: viewModel.libraryCounts.corrupt)
+                        .tag(SidebarFilter.corrupt)
+                }
             }
 
             sectionHeader("COLLECTIONS", isExpanded: $viewModel.isCollectionsExpanded)
