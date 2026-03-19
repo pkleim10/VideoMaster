@@ -106,7 +106,7 @@ private struct LibraryContentView: View {
                             Label("Surprise Me!", systemImage: "exclamationmark.circle.fill")
                         }
                         .disabled(vm.filteredVideos.isEmpty)
-                        .help("Play a random video from the current list")
+                        .help(vm.surpriseMeAutoPlays ? "Play a random video from the current list" : "Choose a random video from the current list")
 
                         SortMenuButton(viewModel: vm)
                     }

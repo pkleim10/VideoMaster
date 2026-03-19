@@ -9,7 +9,11 @@ final class LibraryViewModel {
     var videos: [Video] = [] {
         didSet {
             updateLibraryCounts()
-            recomputeFilteredVideos()
+            if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                refreshSearchIfActive()
+            } else {
+                recomputeFilteredVideos()
+            }
             scheduleCollectionCountRefresh()
         }
     }
@@ -30,6 +34,10 @@ final class LibraryViewModel {
         didSet {
             let oldSort = VideoSort.from(keyPath: oldValue.first?.keyPath ?? \Video.dateAdded)
             let newSort = VideoSort.from(keyPath: tableSortOrder.first?.keyPath ?? \Video.dateAdded)
+            if oldSort != newSort, tableSortOrder.first?.order != .forward {
+                tableSortOrder = newSort.comparators(ascending: true)
+                return
+            }
             guard oldSort != newSort || oldValue.first?.order != tableSortOrder.first?.order else { return }
             recomputeFilteredVideos()
             savePreferences()
@@ -418,6 +426,24 @@ final class LibraryViewModel {
 
     // MARK: - FTS5 Search
 
+    /// Refreshes ftsMatchIds when videos change (e.g. after rename) so search results stay correct.
+    private func refreshSearchIfActive() {
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        searchTask?.cancel()
+        searchTask = Task {
+            do {
+                let results = try await videoRepo.search(trimmed)
+                guard !Task.isCancelled else { return }
+                ftsMatchIds = Set(results.map(\.id))
+            } catch {
+                guard !Task.isCancelled else { return }
+                ftsMatchIds = nil
+            }
+            recomputeFilteredVideos()
+        }
+    }
+
     private func debouncedSearch() {
         searchTask?.cancel()
         let trimmed = searchText.trimmingCharacters(in: .whitespaces)
@@ -592,15 +618,19 @@ final class LibraryViewModel {
         filteredVideos = newValue
         if structureChanged {
             filteredVideosVersion &+= 1
-            if let id = pendingScrollToAfterRename {
+            if let id = pendingScrollToAfterRename, newValue.contains(where: { $0.id == id }) {
                 pendingScrollToAfterRename = nil
                 scrollToVideoId = id
+                selectedVideoIds = [id]
+                lastSelectedVideoId = id
             }
             let validIds = Set(newValue.map(\.id))
             let pruned = selectedVideoIds.intersection(validIds)
             if pruned != selectedVideoIds {
                 selectedVideoIds = pruned
             }
+        } else if pendingScrollToAfterRename != nil {
+            pendingScrollToAfterRename = nil
         }
     }
 

@@ -24,6 +24,18 @@ struct VideoMasterApp: App {
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(after: .sidebar) {
+                Button("Surprise Me!") {
+                    guard let vm = appState.libraryViewModel,
+                          let random = vm.filteredVideos.randomElement()
+                    else { return }
+                    vm.selectedVideoIds = [random.id]
+                    vm.lastSelectedVideoId = random.id
+                    vm.scrollToVideoId = random.id
+                    vm.pendingAutoPlay = vm.surpriseMeAutoPlays
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(appState.libraryViewModel?.filteredVideos.isEmpty ?? true)
+
                 Button("Clear Tag Filters") {
                     appState.libraryViewModel?.clearTagFilters()
                 }

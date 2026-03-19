@@ -7,12 +7,6 @@ struct FileExtSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Text("Extensions recognized as video files when scanning folders. Uncheck to temporarily exclude an extension from scans.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Extensions") {
                 ForEach(manager.entries) { entry in
                     HStack(spacing: 12) {
                         Toggle("", isOn: Binding(
@@ -37,6 +31,10 @@ struct FileExtSettingsView: View {
                         .buttonStyle(.borderless)
                     }
                 }
+            } header: {
+                Text("Extensions")
+            } footer: {
+                Text("Extensions recognized as video files when scanning folders. Uncheck to temporarily exclude an extension from scans.")
             }
 
             Section("Add extension") {

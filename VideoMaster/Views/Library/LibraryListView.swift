@@ -173,10 +173,13 @@ struct LibraryListView: View {
                 scrollToSelectedRow(delay: 0.3)
             }
         }
-        .onChange(of: viewModel.scrollToVideoId) { _, targetId in
+        .onChange(of: viewModel.scrollToVideoId, initial: true) { _, targetId in
             guard let id = targetId else { return }
             viewModel.scrollToVideoId = nil
-            scrollToRow(withId: id, delay: 0.2)
+            // Table may not have laid out yet after version bump; retry with increasing delays
+            for delay in [0.05, 0.15, 0.35] as [Double] {
+                scrollToRow(withId: id, delay: delay)
+            }
         }
         .contextMenu(forSelectionType: Video.ID.self) { ids in
             if let filePath = ids.first,

@@ -36,25 +36,17 @@ struct LibrarySettingsView: View {
 
     var body: some View {
         Form {
-            Toggle("Exclude corrupt files from filters", isOn: $viewModel.excludeCorrupt)
+            Section {
+                Toggle("Exclude corrupt files from filters", isOn: $viewModel.excludeCorrupt)
+            } footer: {
+                Text("Corrupt files (missing duration and resolution) will be hidden from Library, Collections, Rating, and Tag filters. They remain visible in the Corrupt filter and name search.")
+            }
 
-            Text("Corrupt files (missing duration and resolution) will be hidden from Library, Collections, Rating, and Tag filters. They remain visible in the Corrupt filter and name search.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
-
-            Divider()
-                .padding(.vertical, 4)
-
-            Toggle("Confirm deletions", isOn: $viewModel.confirmDeletions)
-
-            Text("When enabled, a confirmation dialog will appear before moving files to Trash.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
-
-            Divider()
-                .padding(.vertical, 4)
+            Section {
+                Toggle("Confirm deletions", isOn: $viewModel.confirmDeletions)
+            } footer: {
+                Text("When enabled, a confirmation dialog will appear before moving files to Trash.")
+            }
 
             Section("Sidebar Filters") {
                 filterRow(
@@ -133,7 +125,7 @@ struct VideoSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Default Filmstrip Size") {
+            Section {
                 HStack(spacing: 24) {
                     compactStepper("Rows", value: $viewModel.defaultFilmstripRows, range: 1...6)
                     compactStepper("Columns", value: $viewModel.defaultFilmstripColumns, range: 1...8)
@@ -143,27 +135,20 @@ struct VideoSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text("This sets the default grid size when generating new filmstrips. You can override it per video using Modify Filmstrip.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
                 Button("Regenerate filmstrips") {
                     Task { await viewModel.clearFilmstripCacheAndMarkApplied() }
                 }
                 .disabled(!viewModel.filmstripLayoutChanged)
-
-                Text("Clear cached filmstrips so they are recreated with the new layout when you view each video.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Default Filmstrip Size")
+            } footer: {
+                Text("This sets the default grid size when generating new filmstrips. You can override it per video using Modify Filmstrip. Regenerate clears cached filmstrips so they are recreated with the new layout when you view each video.")
             }
 
             Section {
                 Toggle("Surprise Me! auto-plays selected video", isOn: $viewModel.surpriseMeAutoPlays)
-
+            } footer: {
                 Text("When enabled, clicking Surprise Me! will immediately start playing the randomly selected video. When disabled, the video is selected and scrolled to but not played.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
             }
         }
         .formStyle(.grouped)
