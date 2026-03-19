@@ -40,6 +40,13 @@ struct VideoDetailView: View {
                         .frame(width: 160)
                         .padding(.top, 8)
                         .padding(.bottom, 4)
+
+                        if !viewModel.showThumbnailInDetail, filmstrip != nil {
+                            Text("Click any frame to start playback from that point")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.bottom, 4)
+                        }
                     }
 
                     thumbnailSection(maxHeight: thumbnailHeight)

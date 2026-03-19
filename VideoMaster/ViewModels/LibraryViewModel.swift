@@ -38,18 +38,13 @@ final class LibraryViewModel {
     var viewMode: ViewMode = .grid
     var gridSize: GridSize = .medium
     var sidebarFilter: SidebarFilter? = .all {
-        didSet {
-            if sidebarFilter != .tags {
-                selectedTagIds = []
-            }
-            recomputeFilteredVideos()
-        }
+        didSet { recomputeFilteredVideos() }
     }
     var selectedTagIds: Set<Int64> = [] {
-        didSet { if sidebarFilter == .tags { recomputeFilteredVideos() } }
+        didSet { recomputeFilteredVideos() }
     }
     var tagFilterMode: MatchMode = .all {
-        didSet { if sidebarFilter == .tags { recomputeFilteredVideos() } }
+        didSet { recomputeFilteredVideos() }
     }
     var isScanning: Bool = false
     var scanProgress: String = ""
@@ -75,8 +70,14 @@ final class LibraryViewModel {
     var isEditingText: Bool = false
     var renamingVideoId: String?
     var renameText: String = ""
+    var renamingTagId: Int64?
+    var tagRenameText: String = ""
     var scrollToVideoId: String?
     var scrollToSelectedOnViewSwitch: Bool = false
+    /// Set by renameVideo when sorted by name; consumed by applyFilteredVideos to scroll in same cycle as bump.
+    var pendingScrollToAfterRename: String?
+    var pendingDeleteIds: Set<String> = []
+    var showDeleteConfirmation: Bool = false
 
     var isSortedByName: Bool {
         guard let first = tableSortOrder.first else { return false }
@@ -91,7 +92,10 @@ final class LibraryViewModel {
     private var searchTask: Task<Void, Never>?
     private var ftsMatchIds: Set<String>?
     private var duplicateVideoIds: Set<String> = []
-    private var isRecomputingFilter = false
+    private var missingVideoIds: Set<String> = []
+    private(set) var missingCountScanned: Bool = false
+    private(set) var isRefreshingMissing: Bool = false
+    private var filterGeneration: Int = 0
 
     let dbPool: DatabasePool
     let videoRepo: VideoRepository
@@ -127,6 +131,8 @@ final class LibraryViewModel {
     private static let columnCustomizationKey = "VideoMaster.columnCustomization"
     private static let filmstripRowsKey = "VideoMaster.filmstripRows"
     private static let filmstripColumnsKey = "VideoMaster.filmstripColumns"
+    private static let lastAppliedFilmstripRowsKey = "VideoMaster.lastAppliedFilmstripRows"
+    private static let lastAppliedFilmstripColumnsKey = "VideoMaster.lastAppliedFilmstripColumns"
     private static let surpriseMeAutoPlaysKey = "VideoMaster.surpriseMeAutoPlays"
     private static let recentlyAddedDaysKey = "VideoMaster.recentlyAddedDays"
     private static let recentlyPlayedDaysKey = "VideoMaster.recentlyPlayedDays"
@@ -136,6 +142,9 @@ final class LibraryViewModel {
     private static let showTopRatedKey = "VideoMaster.showTopRated"
     private static let showDuplicatesKey = "VideoMaster.showDuplicates"
     private static let showCorruptKey = "VideoMaster.showCorrupt"
+    private static let showMissingKey = "VideoMaster.showMissing"
+    private static let missingCountScannedKey = "VideoMaster.missingCountScanned"
+    private static let missingVideoIdsKey = "VideoMaster.missingVideoIds"
 
     var excludeCorrupt: Bool = false {
         didSet {
@@ -211,13 +220,21 @@ final class LibraryViewModel {
         }
     }
 
+    var showMissing: Bool = true {
+        didSet {
+            UserDefaults.standard.set(showMissing, forKey: Self.showMissingKey)
+            resetFilterIfHidden()
+        }
+    }
+
     private func resetFilterIfHidden() {
         switch sidebarFilter {
         case .recentlyAdded where !showRecentlyAdded,
              .recentlyPlayed where !showRecentlyPlayed,
              .topRated where !showTopRated,
              .duplicates where !showDuplicates,
-             .corrupt where !showCorrupt:
+             .corrupt where !showCorrupt,
+             .missing where !showMissing:
             sidebarFilter = .all
         default:
             break
@@ -240,6 +257,13 @@ final class LibraryViewModel {
         didSet {
             UserDefaults.standard.set(defaultFilmstripColumns, forKey: Self.filmstripColumnsKey)
         }
+    }
+
+    private(set) var lastAppliedFilmstripRows: Int = 2
+    private(set) var lastAppliedFilmstripColumns: Int = 4
+
+    var filmstripLayoutChanged: Bool {
+        defaultFilmstripRows != lastAppliedFilmstripRows || defaultFilmstripColumns != lastAppliedFilmstripColumns
     }
 
     var showThumbnailInDetail: Bool = true {
@@ -316,6 +340,16 @@ final class LibraryViewModel {
         if let cols = defaults.object(forKey: Self.filmstripColumnsKey) as? Int, cols > 0 {
             defaultFilmstripColumns = cols
         }
+        if let rows = defaults.object(forKey: Self.lastAppliedFilmstripRowsKey) as? Int, rows > 0 {
+            lastAppliedFilmstripRows = rows
+        } else {
+            lastAppliedFilmstripRows = defaultFilmstripRows
+        }
+        if let cols = defaults.object(forKey: Self.lastAppliedFilmstripColumnsKey) as? Int, cols > 0 {
+            lastAppliedFilmstripColumns = cols
+        } else {
+            lastAppliedFilmstripColumns = defaultFilmstripColumns
+        }
         if let days = defaults.object(forKey: Self.recentlyAddedDaysKey) as? Int, days > 0 {
             recentlyAddedDays = days
         }
@@ -330,6 +364,9 @@ final class LibraryViewModel {
         if let v = defaults.object(forKey: Self.showTopRatedKey) as? Bool { showTopRated = v }
         if let v = defaults.object(forKey: Self.showDuplicatesKey) as? Bool { showDuplicates = v }
         if let v = defaults.object(forKey: Self.showCorruptKey) as? Bool { showCorrupt = v }
+        if let v = defaults.object(forKey: Self.showMissingKey) as? Bool { showMissing = v }
+        if let v = defaults.object(forKey: Self.missingCountScannedKey) as? Bool { missingCountScanned = v }
+        if let ids = defaults.stringArray(forKey: Self.missingVideoIdsKey) { missingVideoIds = Set(ids) }
         if defaults.object(forKey: Self.showThumbnailInDetailKey) != nil {
             showThumbnailInDetail = defaults.bool(forKey: Self.showThumbnailInDetailKey)
         }
@@ -411,95 +448,159 @@ final class LibraryViewModel {
     }
 
     private func recomputeFilteredVideos() {
-        guard !isRecomputingFilter else { return }
-        isRecomputingFilter = true
-        defer { isRecomputingFilter = false }
+        filterGeneration += 1
+        let gen = filterGeneration
+        let snapshot = FilterSnapshot(
+            videos: videos,
+            tagsByVideoId: tagsByVideoId,
+            cachedCollectionRules: cachedCollectionRules,
+            sidebarFilter: sidebarFilter,
+            selectedTagIds: selectedTagIds,
+            tagFilterMode: tagFilterMode,
+            tableSortOrder: tableSortOrder,
+            excludeCorrupt: excludeCorrupt,
+            searchText: searchText,
+            ftsMatchIds: ftsMatchIds,
+            duplicateVideoIds: duplicateVideoIds,
+            missingVideoIds: missingVideoIds,
+            recentlyAddedDays: recentlyAddedDays,
+            recentlyPlayedDays: recentlyPlayedDays,
+            topRatedMinRating: topRatedMinRating
+        )
+        let repo = collectionRepo
 
-        var result = videos
+        Task.detached(priority: .userInitiated) {
+            let result = Self.computeFilteredResult(snapshot: snapshot, collectionRepo: repo)
+            await MainActor.run {
+                guard gen == self.filterGeneration else { return }
+                self.applyFilteredVideos(result.videos)
+                self.tagCounts = result.tagCounts
+            }
+        }
+    }
 
-        let isSearching = !searchText.isEmpty
-        let isCorruptFilter = sidebarFilter == .corrupt
+    private struct FilterSnapshot {
+        let videos: [Video]
+        let tagsByVideoId: [Int64: [Tag]]
+        let cachedCollectionRules: [Int64: [CollectionRule]]
+        let sidebarFilter: SidebarFilter?
+        let selectedTagIds: Set<Int64>
+        let tagFilterMode: MatchMode
+        let tableSortOrder: [KeyPathComparator<Video>]
+        let excludeCorrupt: Bool
+        let searchText: String
+        let ftsMatchIds: Set<String>?
+        let duplicateVideoIds: Set<String>
+        let missingVideoIds: Set<String>
+        let recentlyAddedDays: Int
+        let recentlyPlayedDays: Int
+        let topRatedMinRating: Int
+    }
 
-        if excludeCorrupt && !isCorruptFilter && !isSearching {
-            result = result.filter { !Self.isCorrupt($0) }
+    private nonisolated static func computeFilteredResult(snapshot: FilterSnapshot, collectionRepo: CollectionRepository) -> (videos: [Video], tagCounts: [Int64: Int]) {
+        func isCorrupt(_ video: Video) -> Bool {
+            video.duration == nil && video.width == nil && video.height == nil
+        }
+        var baseResult = snapshot.videos
+        let isSearching = !snapshot.searchText.isEmpty
+        let isCorruptFilter = snapshot.sidebarFilter == .corrupt
+
+        if snapshot.excludeCorrupt && !isCorruptFilter && !isSearching {
+            baseResult = baseResult.filter { !isCorrupt($0) }
         }
 
-        if isSearching, let matchIds = ftsMatchIds {
-            result = result.filter { matchIds.contains($0.id) }
+        if isSearching, let matchIds = snapshot.ftsMatchIds {
+            baseResult = baseResult.filter { matchIds.contains($0.id) }
         }
 
-        switch sidebarFilter {
+        switch snapshot.sidebarFilter {
         case .recentlyAdded:
-            let cutoff = Calendar.current.date(byAdding: .day, value: -recentlyAddedDays, to: Date()) ?? Date()
-            result = result.filter { $0.dateAdded >= cutoff }
+            let cutoff = Calendar.current.date(byAdding: .day, value: -snapshot.recentlyAddedDays, to: Date()) ?? Date()
+            baseResult = baseResult.filter { $0.dateAdded >= cutoff }
         case .recentlyPlayed:
-            let cutoff = Calendar.current.date(byAdding: .day, value: -recentlyPlayedDays, to: Date()) ?? Date()
-            result = result.filter { ($0.lastPlayed ?? .distantPast) >= cutoff }
-                .sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
-            applyFilteredVideos(result)
-            return
+            let cutoff = Calendar.current.date(byAdding: .day, value: -snapshot.recentlyPlayedDays, to: Date()) ?? Date()
+            baseResult = baseResult.filter { ($0.lastPlayed ?? .distantPast) >= cutoff }
         case .topRated:
-            result = result.filter { $0.rating >= topRatedMinRating }
+            baseResult = baseResult.filter { $0.rating >= snapshot.topRatedMinRating }
         case .duplicates:
-            result = result.filter { duplicateVideoIds.contains($0.id) }
+            baseResult = baseResult.filter { snapshot.duplicateVideoIds.contains($0.id) }
         case .corrupt:
-            result = result.filter { Self.isCorrupt($0) }
+            baseResult = baseResult.filter { isCorrupt($0) }
+        case .missing:
+            baseResult = baseResult.filter { snapshot.missingVideoIds.contains($0.id) }
         case .rating(let stars):
-            result = result.filter { $0.rating == stars }
+            baseResult = baseResult.filter { $0.rating == stars }
         case .collection(let collection):
             guard let collectionId = collection.id else {
-                applyFilteredVideos([])
-                return
+                return ([], [:])
             }
-            let rules = cachedCollectionRules[collectionId] ?? []
+            let rules = snapshot.cachedCollectionRules[collectionId] ?? []
             if rules.isEmpty {
-                applyFilteredVideos([])
-                return
+                return ([], [:])
             }
-            result = result.filter { video in
+            baseResult = baseResult.filter { video in
                 collectionRepo.matchesRules(
                     video: video,
                     rules: rules,
-                    tags: tagsByVideoId[video.databaseId ?? -1] ?? [],
+                    tags: snapshot.tagsByVideoId[video.databaseId ?? -1] ?? [],
                     mode: collection.matchMode
                 )
-            }
-        case .tag(let tag):
-            guard let tagId = tag.id else {
-                applyFilteredVideos([])
-                return
-            }
-            result = result.filter { video in
-                let videoTags = tagsByVideoId[video.databaseId ?? -1] ?? []
-                return videoTags.contains { $0.id == tagId }
-            }
-        case .tags:
-            if selectedTagIds.isEmpty {
-                applyFilteredVideos([])
-                return
-            }
-            result = result.filter { video in
-                let videoTagIds = Set((tagsByVideoId[video.databaseId ?? -1] ?? []).compactMap(\.id))
-                switch tagFilterMode {
-                case .all:
-                    return selectedTagIds.isSubset(of: videoTagIds)
-                case .any:
-                    return !selectedTagIds.isDisjoint(with: videoTagIds)
-                }
             }
         default:
             break
         }
 
-        result.sort(using: tableSortOrder)
-        applyFilteredVideos(result)
+        let tagCounts = computeTagCounts(snapshot: snapshot, baseVideos: baseResult)
+
+        var result = baseResult
+        if !snapshot.selectedTagIds.isEmpty {
+            result = result.filter { video in
+                let videoTagIds = Set((snapshot.tagsByVideoId[video.databaseId ?? -1] ?? []).compactMap(\.id))
+                switch snapshot.tagFilterMode {
+                case .all: return snapshot.selectedTagIds.isSubset(of: videoTagIds)
+                case .any: return !snapshot.selectedTagIds.isDisjoint(with: videoTagIds)
+                }
+            }
+        }
+
+        if snapshot.sidebarFilter == .recentlyPlayed {
+            result = result.sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
+        } else {
+            result.sort(using: snapshot.tableSortOrder)
+        }
+        return (result, tagCounts)
+    }
+
+    private nonisolated static func computeTagCounts(snapshot: FilterSnapshot, baseVideos: [Video]) -> [Int64: Int] {
+        let baseIds = Set(baseVideos.compactMap(\.databaseId))
+        var counts: [Int64: Int] = [:]
+        for (videoId, tags) in snapshot.tagsByVideoId {
+            guard baseIds.contains(videoId) else { continue }
+            for tag in tags {
+                guard let tagId = tag.id else { continue }
+                counts[tagId, default: 0] += 1
+            }
+        }
+        return counts
     }
 
     private func applyFilteredVideos(_ newValue: [Video]) {
-        let orderChanged = newValue.map(\.id) != filteredVideos.map(\.id)
+        // Only bump version when structure changes (add/remove/reorder), not on rename.
+        // Rename changes filePath (id) but keeps same databaseId order — avoid view recreation to preserve scroll.
+        let structureChanged = newValue.count != filteredVideos.count ||
+            newValue.map(\.databaseId) != filteredVideos.map(\.databaseId)
         filteredVideos = newValue
-        if orderChanged {
+        if structureChanged {
             filteredVideosVersion &+= 1
+            if let id = pendingScrollToAfterRename {
+                pendingScrollToAfterRename = nil
+                scrollToVideoId = id
+            }
+            let validIds = Set(newValue.map(\.id))
+            let pruned = selectedVideoIds.intersection(validIds)
+            if pruned != selectedVideoIds {
+                selectedVideoIds = pruned
+            }
         }
     }
 
@@ -549,23 +650,68 @@ final class LibraryViewModel {
             topRated: topRated,
             duplicates: dupIds.count,
             corrupt: corrupt,
+            missing: missingCountScanned ? missingVideoIds.count : 0,
             byRating: byRating
         )
     }
 
     private func updateTagCounts() {
+        let baseVideos = baseVideosForPrimaryFilter()
         var counts: [Int64: Int] = [:]
-        let excludedVideoIds: Set<Int64> = excludeCorrupt
-            ? Set(videos.filter { Self.isCorrupt($0) }.compactMap(\.databaseId))
-            : []
+        let baseIds = Set(baseVideos.compactMap(\.databaseId))
         for (videoId, tags) in tagsByVideoId {
-            if excludedVideoIds.contains(videoId) { continue }
+            guard baseIds.contains(videoId) else { continue }
             for tag in tags {
                 guard let tagId = tag.id else { continue }
                 counts[tagId, default: 0] += 1
             }
         }
         tagCounts = counts
+    }
+
+    /// Videos after applying primary filter (library/collection), before tag filter.
+    private func baseVideosForPrimaryFilter() -> [Video] {
+        var result = videos
+        let isCorruptFilter = sidebarFilter == .corrupt
+        if excludeCorrupt && !isCorruptFilter && searchText.isEmpty {
+            result = result.filter { !Self.isCorrupt($0) }
+        }
+        if !searchText.isEmpty, let matchIds = ftsMatchIds {
+            result = result.filter { matchIds.contains($0.id) }
+        }
+        switch sidebarFilter {
+        case .recentlyAdded:
+            let cutoff = Calendar.current.date(byAdding: .day, value: -recentlyAddedDays, to: Date()) ?? Date()
+            result = result.filter { $0.dateAdded >= cutoff }
+        case .recentlyPlayed:
+            let cutoff = Calendar.current.date(byAdding: .day, value: -recentlyPlayedDays, to: Date()) ?? Date()
+            result = result.filter { ($0.lastPlayed ?? .distantPast) >= cutoff }
+        case .topRated:
+            result = result.filter { $0.rating >= topRatedMinRating }
+        case .duplicates:
+            result = result.filter { duplicateVideoIds.contains($0.id) }
+        case .corrupt:
+            result = result.filter { Self.isCorrupt($0) }
+        case .missing:
+            result = result.filter { missingVideoIds.contains($0.id) }
+        case .rating(let stars):
+            result = result.filter { $0.rating == stars }
+        case .collection(let collection):
+            guard let collectionId = collection.id else { return [] }
+            let rules = cachedCollectionRules[collectionId] ?? []
+            if rules.isEmpty { return [] }
+            result = result.filter { video in
+                collectionRepo.matchesRules(
+                    video: video,
+                    rules: rules,
+                    tags: tagsByVideoId[video.databaseId ?? -1] ?? [],
+                    mode: collection.matchMode
+                )
+            }
+        default:
+            break
+        }
+        return result
     }
 
     // MARK: - Actions
@@ -610,6 +756,50 @@ final class LibraryViewModel {
                 } else {
                     scanProgress = ""
                 }
+                isScanning = false
+                await refreshAfterScan()
+            case .error(let message):
+                scanProgress = "Error: \(message)"
+                isScanning = false
+                startObserving()
+            }
+        }
+    }
+
+    func importDroppedFiles(_ urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+
+        let videoUrls = urls.filter { $0.isVideoFile }
+        guard !videoUrls.isEmpty else { return }
+
+        let parentFolders = Set(videoUrls.map { $0.deletingLastPathComponent() })
+        for folder in parentFolders {
+            let path = folder.path
+            let alreadySaved = (try? await dataSourceRepo.exists(folderPath: path)) ?? false
+            if !alreadySaved {
+                let source = DataSource(
+                    folderPath: path,
+                    name: folder.lastPathComponent,
+                    dateAdded: Date()
+                )
+                try? await dataSourceRepo.insert(source)
+            }
+        }
+
+        isScanning = true
+        scanProgress = "Importing dropped files..."
+        stopObserving()
+
+        for await update in await scanner.scanFiles(videoUrls) {
+            switch update {
+            case .started(let total):
+                scanTotal = total
+                scanCurrent = 0
+            case .progress(let current, let total, _):
+                scanCurrent = current
+                scanTotal = total
+            case .completed:
+                scanProgress = ""
                 isScanning = false
                 await refreshAfterScan()
             case .error(let message):
@@ -720,6 +910,9 @@ final class LibraryViewModel {
                 selectedVideoIds.remove(video.filePath)
                 selectedVideoIds.insert(newFilePath)
             }
+            if isSortedByName {
+                pendingScrollToAfterRename = newFilePath
+            }
             return newFilePath
         } catch {
             print("Rename failed: \(error)")
@@ -727,23 +920,90 @@ final class LibraryViewModel {
         }
     }
 
+    func refreshMissingCount() async {
+        guard !isRefreshingMissing else { return }
+        isRefreshingMissing = true
+        defer { isRefreshingMissing = false }
+        let snapshot = videos
+        let missIds = await Task.detached(priority: .userInitiated) {
+            let fm = FileManager.default
+            return Set(snapshot.filter { !fm.fileExists(atPath: $0.filePath) }.map(\.id))
+        }.value
+        missingVideoIds = missIds
+        missingCountScanned = true
+        UserDefaults.standard.set(true, forKey: Self.missingCountScannedKey)
+        UserDefaults.standard.set(Array(missIds), forKey: Self.missingVideoIdsKey)
+        libraryCounts = LibraryCounts(
+            all: libraryCounts.all,
+            recentlyAdded: libraryCounts.recentlyAdded,
+            recentlyPlayed: libraryCounts.recentlyPlayed,
+            topRated: libraryCounts.topRated,
+            duplicates: libraryCounts.duplicates,
+            corrupt: libraryCounts.corrupt,
+            missing: missIds.count,
+            byRating: libraryCounts.byRating
+        )
+        recomputeFilteredVideos()
+    }
+
+    func clearFilmstripCacheAndMarkApplied() async {
+        await thumbnailService.deleteAllFilmstrips()
+        if let selectedId = lastSelectedVideoId ?? selectedVideoIds.first,
+           let video = videos.first(where: { $0.filePath == selectedId })
+        {
+            _ = try? await thumbnailService.generateFilmstrip(
+                for: video,
+                rows: defaultFilmstripRows,
+                columns: defaultFilmstripColumns
+            )
+        }
+        lastAppliedFilmstripRows = defaultFilmstripRows
+        lastAppliedFilmstripColumns = defaultFilmstripColumns
+        UserDefaults.standard.set(lastAppliedFilmstripRows, forKey: Self.lastAppliedFilmstripRowsKey)
+        UserDefaults.standard.set(lastAppliedFilmstripColumns, forKey: Self.lastAppliedFilmstripColumnsKey)
+        filmstripRefreshId &+= 1
+    }
+
+    private func updateMissingAfterRemove(_ ids: Set<String>) {
+        guard missingCountScanned, !ids.isEmpty else { return }
+        missingVideoIds.subtract(ids)
+        UserDefaults.standard.set(Array(missingVideoIds), forKey: Self.missingVideoIdsKey)
+        libraryCounts = LibraryCounts(
+            all: libraryCounts.all,
+            recentlyAdded: libraryCounts.recentlyAdded,
+            recentlyPlayed: libraryCounts.recentlyPlayed,
+            topRated: libraryCounts.topRated,
+            duplicates: libraryCounts.duplicates,
+            corrupt: libraryCounts.corrupt,
+            missing: missingVideoIds.count,
+            byRating: libraryCounts.byRating
+        )
+        recomputeFilteredVideos()
+    }
+
     func deleteVideos(_ ids: Set<String>) async {
         for filePath in ids {
             if let video = videos.first(where: { $0.filePath == filePath }) {
                 try? await videoRepo.delete(video)
-                try? FileManager.default.removeItem(at: video.url)
+                var resultingURL: NSURL?
+                try? FileManager.default.trashItem(at: video.url, resultingItemURL: &resultingURL)
             }
         }
         selectedVideoIds.subtract(ids)
+        updateMissingAfterRemove(ids)
     }
 
     func removeVideosFromLibrary(_ ids: Set<String>) async {
+        guard !ids.isEmpty else { return }
+        stopObserving()
         for filePath in ids {
             if let video = videos.first(where: { $0.filePath == filePath }) {
                 try? await videoRepo.delete(video)
             }
         }
         selectedVideoIds.subtract(ids)
+        updateMissingAfterRemove(ids)
+        await refreshAfterScan()
     }
 
     func recordPlay(for video: Video) async {
@@ -822,12 +1082,13 @@ final class LibraryViewModel {
         }
     }
 
+    func clearTagFilters() {
+        selectedTagIds = []
+    }
+
     func deleteTag(_ tag: Tag) async {
         guard let tagId = tag.id else { return }
         selectedTagIds.remove(tagId)
-        if selectedTagIds.isEmpty && sidebarFilter == .tags {
-            sidebarFilter = .all
-        }
         do {
             try await tagRepo.delete(tagId)
             await reloadTagState()

@@ -54,8 +54,6 @@ struct LibraryListView: View {
     let thumbnailService: ThumbnailService
 
     @State private var filmstripVideo: Video?
-    @State private var pendingDeleteIds: Set<String> = []
-    @State private var showDeleteConfirmation = false
     @FocusState private var isRenameFocused: Bool
     @State private var scrollToRow: Int?
     @State private var thumbnailPopoverVideoId: String?
@@ -184,7 +182,7 @@ struct LibraryListView: View {
             if let filePath = ids.first,
                let video = viewModel.filteredVideos.first(where: { $0.id == filePath })
             {
-                Button("Play") {
+                Button("Play in External Player") {
                     NSWorkspace.shared.open(video.url)
                     Task { await viewModel.recordPlay(for: video) }
                 }
@@ -206,8 +204,14 @@ struct LibraryListView: View {
                         }
                     }
                 }
+                if ids.count == 1 {
+                    Button("Rename") {
+                        viewModel.renameText = video.fileName
+                        viewModel.renamingVideoId = video.id
+                    }
+                }
                 Divider()
-                Button("Modify Filmstrip...") {
+                Button("Modify Filmstrip\u{2026}") {
                     filmstripVideo = video
                 }
                 Divider()
@@ -216,8 +220,8 @@ struct LibraryListView: View {
                 }
                 Button("Delete Video…", role: .destructive) {
                     if viewModel.confirmDeletions {
-                        pendingDeleteIds = ids
-                        showDeleteConfirmation = true
+                        viewModel.pendingDeleteIds = ids
+                        viewModel.showDeleteConfirmation = true
                     } else {
                         Task { await viewModel.deleteVideos(ids) }
                     }
@@ -242,23 +246,23 @@ struct LibraryListView: View {
             }
         }
         .confirmationDialog(
-            "Delete \(pendingDeleteIds.count == 1 ? "Video" : "\(pendingDeleteIds.count) Videos")",
-            isPresented: $showDeleteConfirmation,
+            "Delete \(viewModel.pendingDeleteIds.count == 1 ? "Video" : "\(viewModel.pendingDeleteIds.count) Videos")",
+            isPresented: $viewModel.showDeleteConfirmation,
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                let ids = pendingDeleteIds
-                pendingDeleteIds = []
+                let ids = viewModel.pendingDeleteIds
+                viewModel.pendingDeleteIds = []
                 Task { await viewModel.deleteVideos(ids) }
             }
             Button("Cancel", role: .cancel) {
-                pendingDeleteIds = []
+                viewModel.pendingDeleteIds = []
             }
         } message: {
-            if pendingDeleteIds.count == 1 {
-                Text("This will permanently delete the file from disk. This action cannot be undone.")
+            if viewModel.pendingDeleteIds.count == 1 {
+                Text("The file will be moved to Trash.")
             } else {
-                Text("This will permanently delete \(pendingDeleteIds.count) files from disk. This action cannot be undone.")
+                Text("\(viewModel.pendingDeleteIds.count) files will be moved to Trash.")
             }
         }
     }
@@ -271,11 +275,7 @@ struct LibraryListView: View {
             return
         }
         Task {
-            if let newPath = await viewModel.renameVideo(video, to: newName),
-               viewModel.isSortedByName
-            {
-                scrollToRow(withId: newPath, delay: 0.3)
-            }
+            _ = await viewModel.renameVideo(video, to: newName)
             viewModel.renameText = ""
         }
     }

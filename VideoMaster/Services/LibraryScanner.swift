@@ -102,6 +102,59 @@ actor LibraryScanner {
         }
     }
 
+    func scanFiles(_ urls: [URL]) -> AsyncStream<ScanUpdate> {
+        AsyncStream { continuation in
+            Task { [weak self] in
+                guard let self else {
+                    continuation.finish()
+                    return
+                }
+                await self.performFilesScan(urls: urls, continuation: continuation)
+            }
+        }
+    }
+
+    private func performFilesScan(urls: [URL], continuation: AsyncStream<ScanUpdate>.Continuation) async {
+        let videoFiles = urls.filter { $0.isVideoFile }
+        guard !videoFiles.isEmpty else {
+            continuation.yield(.started(total: 0))
+            continuation.yield(.completed)
+            continuation.finish()
+            return
+        }
+
+        continuation.yield(.started(total: videoFiles.count))
+
+        let concurrencyLimit = 4
+        var processed = 0
+
+        await withTaskGroup(of: Void.self) { group in
+            for (index, fileURL) in videoFiles.enumerated() {
+                if index >= concurrencyLimit {
+                    await group.next()
+                }
+
+                group.addTask { [self] in
+                    await self.processFile(fileURL)
+                }
+
+                processed += 1
+                continuation.yield(
+                    .progress(
+                        current: processed,
+                        total: videoFiles.count,
+                        fileName: fileURL.lastPathComponent
+                    )
+                )
+            }
+
+            await group.waitForAll()
+        }
+
+        continuation.yield(.completed)
+        continuation.finish()
+    }
+
     func scanForNewFiles(folders: [URL], knownPaths: Set<String>) -> AsyncStream<ScanUpdate> {
         AsyncStream { continuation in
             Task { [weak self] in

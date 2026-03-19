@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
@@ -19,6 +21,12 @@ private struct LibraryContentView: View {
     let thumbService: ThumbnailService
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
+    private var navigationTitle: String {
+        let name = DatabaseExportImport.activeLibraryDisplayName
+        if name.isEmpty || name == "VideoMaster" { return "VideoMaster" }
+        return "VideoMaster — \(name)"
+    }
+
     var body: some View {
         @Bindable var bindableVM = vm
 
@@ -32,6 +40,30 @@ private struct LibraryContentView: View {
                     } else {
                         LibraryListView(viewModel: vm, thumbnailService: thumbService)
                     }
+                }
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                    guard !providers.isEmpty else { return true }
+                    let group = DispatchGroup()
+                    var urls: [URL] = []
+                    let lock = NSLock()
+                    for provider in providers {
+                        group.enter()
+                        _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+                            defer { group.leave() }
+                            if let data = data,
+                               let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                               let url = URL(string: path)
+                            {
+                                lock.lock()
+                                urls.append(url)
+                                lock.unlock()
+                            }
+                        }
+                    }
+                    group.notify(queue: .main) {
+                        Task { await vm.importDroppedFiles(urls) }
+                    }
+                    return true
                 }
                 .toolbar {
                     ToolbarItemGroup(placement: .primaryAction) {
@@ -79,6 +111,17 @@ private struct LibraryContentView: View {
                         SortMenuButton(viewModel: vm)
                     }
                 }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        if case .missing = vm.sidebarFilter {
+                            Button(action: { Task { await vm.refreshMissingCount() } }) {
+                                Label("Scan for missing files", systemImage: "magnifyingglass")
+                            }
+                            .disabled(vm.isRefreshingMissing)
+                            .help("Scan for missing files")
+                        }
+                    }
+                }
                 .searchable(text: $bindableVM.searchText, prompt: "Search videos")
                 .overlay {
                     if vm.videos.isEmpty && !vm.isScanning {
@@ -98,7 +141,7 @@ private struct LibraryContentView: View {
                 }
             }
             .navigationSplitViewStyle(.balanced)
-            .navigationTitle("VideoMaster — \(DatabaseExportImport.activeLibraryDisplayName)")
+            .navigationTitle(navigationTitle)
 
             statusBar(vm: vm)
         }
@@ -108,8 +151,8 @@ private struct LibraryContentView: View {
         .onAppear {
             NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 let lvm = vm
-                // Enter key — start inline rename in list or grid mode
-                if event.keyCode == 36, !lvm.isEditingText {
+                // Enter key (without modifiers) — start inline rename in list or grid mode
+                if event.keyCode == 36, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [], !lvm.isEditingText {
                     if (lvm.viewMode == .list || lvm.viewMode == .grid),
                        lvm.selectedVideoIds.count == 1,
                        let videoId = lvm.selectedVideoIds.first,
@@ -125,6 +168,14 @@ private struct LibraryContentView: View {
                 }
                 // Escape key — cancel rename or stop playback
                 if event.keyCode == 53 {
+                    if lvm.renamingTagId != nil {
+                        Task { @MainActor in
+                            lvm.renamingTagId = nil
+                            lvm.tagRenameText = ""
+                            lvm.isEditingText = false
+                        }
+                        return nil
+                    }
                     if lvm.renamingVideoId != nil {
                         Task { @MainActor in
                             lvm.renamingVideoId = nil
@@ -140,8 +191,13 @@ private struct LibraryContentView: View {
                     }
                     return event
                 }
-                // Space key — play/pause
+                // Space key — play/pause (but not when typing in search or other text fields)
                 if event.keyCode == 49 {
+                    if let first = NSApp.keyWindow?.firstResponder,
+                       first is NSTextView || first is NSTextField
+                    {
+                        return event
+                    }
                     guard !lvm.isEditingText, !lvm.selectedVideoIds.isEmpty else { return event }
                     Task { @MainActor in
                         if lvm.isPlayingInline {

@@ -60,8 +60,6 @@ struct LibraryGridView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
     @State private var lastClickedIndex: Int?
-    @State private var pendingDeleteIds: Set<String> = []
-    @State private var showDeleteConfirmation = false
     @State private var filmstripVideo: Video?
     @FocusState private var isRenameFocused: Bool
 
@@ -104,11 +102,14 @@ struct LibraryGridView: View {
                         .padding(padding)
                         .background(ScrollbarEnabler())
                     }
-                    .onChange(of: viewModel.scrollToVideoId) { _, targetId in
+                    .onChange(of: viewModel.scrollToVideoId, initial: true) { _, targetId in
                         guard let id = targetId else { return }
                         viewModel.scrollToVideoId = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            proxy.scrollTo(id, anchor: .center)
+                        // LazyVGrid may not have rendered target yet; retry with increasing delays
+                        for delay in [0.05, 0.15, 0.35] as [Double] {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                                proxy.scrollTo(id, anchor: .center)
+                            }
                         }
                     }
                 }
@@ -139,23 +140,23 @@ struct LibraryGridView: View {
             }
         }
         .confirmationDialog(
-            "Delete \(pendingDeleteIds.count == 1 ? "Video" : "\(pendingDeleteIds.count) Videos")",
-            isPresented: $showDeleteConfirmation,
+            "Delete \(viewModel.pendingDeleteIds.count == 1 ? "Video" : "\(viewModel.pendingDeleteIds.count) Videos")",
+            isPresented: $viewModel.showDeleteConfirmation,
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                let ids = pendingDeleteIds
-                pendingDeleteIds = []
+                let ids = viewModel.pendingDeleteIds
+                viewModel.pendingDeleteIds = []
                 Task { await viewModel.deleteVideos(ids) }
             }
             Button("Cancel", role: .cancel) {
-                pendingDeleteIds = []
+                viewModel.pendingDeleteIds = []
             }
         } message: {
-            if pendingDeleteIds.count == 1 {
-                Text("This will permanently delete the file from disk. This action cannot be undone.")
+            if viewModel.pendingDeleteIds.count == 1 {
+                Text("The file will be moved to Trash.")
             } else {
-                Text("This will permanently delete \(pendingDeleteIds.count) files from disk. This action cannot be undone.")
+                Text("\(viewModel.pendingDeleteIds.count) files will be moved to Trash.")
             }
         }
     }
@@ -205,11 +206,7 @@ struct LibraryGridView: View {
             return
         }
         Task {
-            if let newPath = await viewModel.renameVideo(video, to: newName),
-               viewModel.isSortedByName
-            {
-                viewModel.scrollToVideoId = newPath
-            }
+            _ = await viewModel.renameVideo(video, to: newName)
             viewModel.renameText = ""
         }
     }
@@ -228,7 +225,7 @@ struct LibraryGridView: View {
 
     @ViewBuilder
     private func videoContextMenu(_ video: Video) -> some View {
-        Button("Play") { playVideo(video) }
+        Button("Play in External Player") { playVideo(video) }
         Button("Show in Finder") {
             NSWorkspace.shared.selectFile(video.filePath, inFileViewerRootedAtPath: "")
         }
@@ -245,8 +242,12 @@ struct LibraryGridView: View {
                 }
             }
         }
+        Button("Rename") {
+            viewModel.renameText = video.fileName
+            viewModel.renamingVideoId = video.id
+        }
         Divider()
-        Button("Modify Filmstrip...") {
+        Button("Modify Filmstrip\u{2026}") {
             filmstripVideo = video
         }
         Divider()
@@ -256,8 +257,8 @@ struct LibraryGridView: View {
         Button("Delete Video…", role: .destructive) {
             let ids: Set<String> = [video.id]
             if viewModel.confirmDeletions {
-                pendingDeleteIds = ids
-                showDeleteConfirmation = true
+                viewModel.pendingDeleteIds = ids
+                viewModel.showDeleteConfirmation = true
             } else {
                 Task { await viewModel.deleteVideos(ids) }
             }

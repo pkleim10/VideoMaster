@@ -73,7 +73,7 @@ struct DataSourcesSettingsView: View {
 
                 Spacer()
 
-                Button("Reveal in Finder") {
+                Button("Show in Finder") {
                     if let id = selectedId,
                        let source = dataSources.first(where: { $0.id == id })
                     {

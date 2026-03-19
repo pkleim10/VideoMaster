@@ -150,7 +150,7 @@ actor ThumbnailService {
 
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: 400, height: 225)
+            generator.maximumSize = CGSize(width: 400, height: 400)
             generator.requestedTimeToleranceBefore = CMTime(seconds: 2, preferredTimescale: 600)
             generator.requestedTimeToleranceAfter = CMTime(seconds: 2, preferredTimescale: 600)
 
@@ -175,13 +175,24 @@ actor ThumbnailService {
 
         let compositeImage = NSImage(size: NSSize(width: compositeWidth, height: compositeHeight))
         compositeImage.lockFocus()
+        NSColor.black.setFill()
         for (index, cgImage) in frames.enumerated() {
             let col = index % columns
             let row = index / columns
-            let x = CGFloat(col) * cellWidth
-            let y = compositeHeight - CGFloat(row + 1) * cellHeight
-            let frameImage = NSImage(cgImage: cgImage, size: NSSize(width: cellWidth, height: cellHeight))
-            frameImage.draw(in: NSRect(x: x, y: y, width: cellWidth, height: cellHeight))
+            let cellX = CGFloat(col) * cellWidth
+            let cellY = compositeHeight - CGFloat(row + 1) * cellHeight
+
+            let frameW = CGFloat(cgImage.width)
+            let frameH = CGFloat(cgImage.height)
+            let scale = min(cellWidth / frameW, cellHeight / frameH)
+            let drawW = frameW * scale
+            let drawH = frameH * scale
+            let drawX = cellX + (cellWidth - drawW) / 2
+            let drawY = cellY + (cellHeight - drawH) / 2
+
+            NSRect(x: cellX, y: cellY, width: cellWidth, height: cellHeight).fill()
+            let frameImage = NSImage(cgImage: cgImage, size: NSSize(width: frameW, height: frameH))
+            frameImage.draw(in: NSRect(x: drawX, y: drawY, width: drawW, height: drawH))
         }
         compositeImage.unlockFocus()
 
@@ -195,6 +206,15 @@ actor ThumbnailService {
         try jpegData.write(to: cacheURL)
         memoryCache.setObject(compositeImage, forKey: memKey)
         return compositeImage
+    }
+
+    func deleteAllFilmstrips() {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) else { return }
+        for url in contents where url.lastPathComponent.hasSuffix("_filmstrip.jpg") {
+            try? fm.removeItem(at: url)
+        }
+        memoryCache.removeAllObjects()
     }
 
     func loadFilmstrip(for filePath: String) -> NSImage? {

@@ -21,6 +21,11 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Data Sources", systemImage: "folder")
                 }
+
+            FileExtSettingsView()
+                .tabItem {
+                    Label("File Ext", systemImage: "doc.badge.gearshape")
+                }
         }
         .frame(minWidth: 500, minHeight: 350)
     }
@@ -43,7 +48,7 @@ struct LibrarySettingsView: View {
 
             Toggle("Confirm deletions", isOn: $viewModel.confirmDeletions)
 
-            Text("When enabled, a confirmation dialog will appear before permanently deleting files from disk.")
+            Text("When enabled, a confirmation dialog will appear before moving files to Trash.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 2)
@@ -86,6 +91,8 @@ struct LibrarySettingsView: View {
                 filterRow(title: "Duplicates", isOn: $viewModel.showDuplicates)
 
                 filterRow(title: "Corrupt", isOn: $viewModel.showCorrupt)
+
+                filterRow(title: "Missing", isOn: $viewModel.showMissing)
             }
         }
         .formStyle(.grouped)
@@ -130,16 +137,24 @@ struct VideoSettingsView: View {
                 HStack(spacing: 24) {
                     compactStepper("Rows", value: $viewModel.defaultFilmstripRows, range: 1...6)
                     compactStepper("Columns", value: $viewModel.defaultFilmstripColumns, range: 1...8)
+                    Spacer()
+                    Text("\(viewModel.defaultFilmstripRows * viewModel.defaultFilmstripColumns) frames per filmstrip")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-
-                Text("\(viewModel.defaultFilmstripRows * viewModel.defaultFilmstripColumns) frames per filmstrip")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 Text("This sets the default grid size when generating new filmstrips. You can override it per video using Modify Filmstrip.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+
+                Button("Regenerate filmstrips") {
+                    Task { await viewModel.clearFilmstripCacheAndMarkApplied() }
+                }
+                .disabled(!viewModel.filmstripLayoutChanged)
+
+                Text("Clear cached filmstrips so they are recreated with the new layout when you view each video.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {

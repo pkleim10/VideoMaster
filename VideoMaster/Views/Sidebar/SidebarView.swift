@@ -7,9 +7,7 @@ struct SidebarView: View {
 
     @State private var showNewCollectionSheet = false
     @State private var editingCollection: VideoCollection?
-    @State private var renamingTag: Tag = Tag(name: "")
-    @State private var showRenameTag = false
-    @State private var renameText = ""
+    @FocusState private var isTagRenameFocused: Bool
     @State private var showNewTag = false
     @State private var newTagName = ""
 
@@ -44,6 +42,10 @@ struct SidebarView: View {
                     sidebarRow("Corrupt", icon: "exclamationmark.triangle", count: viewModel.libraryCounts.corrupt)
                         .tag(SidebarFilter.corrupt)
                 }
+                if viewModel.showMissing {
+                    sidebarRow("Missing", icon: "questionmark.circle", count: viewModel.libraryCounts.missing, unscanned: !viewModel.missingCountScanned)
+                        .tag(SidebarFilter.missing)
+                }
             }
 
             sectionHeader("COLLECTIONS", isExpanded: $viewModel.isCollectionsExpanded)
@@ -60,7 +62,7 @@ struct SidebarView: View {
                         collectionRow(collection)
                             .tag(SidebarFilter.collection(collection))
                             .contextMenu {
-                                Button("Edit Collection...") {
+                                Button("Edit Collection\u{2026}") {
                                     editingCollection = collection
                                 }
                                 Divider()
@@ -136,37 +138,6 @@ struct SidebarView: View {
                 onSave: { Task { await viewModel.loadCollections() } }
             )
         }
-        .sheet(isPresented: $showRenameTag) {
-            VStack(spacing: 16) {
-                Text("Rename Tag")
-                    .font(.headline)
-                TextField("Tag name", text: $renameText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        let tag = renamingTag
-                        Task { await viewModel.renameTag(tag, to: trimmed) }
-                        showRenameTag = false
-                    }
-                HStack {
-                    Button("Cancel") { showRenameTag = false }
-                        .keyboardShortcut(.cancelAction)
-                    Spacer()
-                    Button("Rename") {
-                        let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { return }
-                        let tag = renamingTag
-                        Task { await viewModel.renameTag(tag, to: trimmed) }
-                        showRenameTag = false
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .padding(20)
-            .frame(width: 280)
-        }
         .sheet(isPresented: $showNewTag) {
             VStack(spacing: 16) {
                 Text("New Tag")
@@ -227,7 +198,7 @@ struct SidebarView: View {
                         viewModel.sidebarFilter = .collection(collection)
                     }
                     .contextMenu {
-                        Button("Edit Collection...") {
+                        Button("Edit Collection\u{2026}") {
                             editingCollection = collection
                         }
                         Divider()
@@ -273,7 +244,23 @@ struct SidebarView: View {
                         .foregroundColor(.white)
                 }
                 .buttonStyle(.plain)
+                if !viewModel.selectedTagIds.isEmpty {
+                    Button(action: { viewModel.clearTagFilters() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear tag filters")
+                }
             }
+        }
+        .contextMenu {
+            Button("Clear Tag Filters") {
+                viewModel.clearTagFilters()
+            }
+            .disabled(viewModel.selectedTagIds.isEmpty)
+            .keyboardShortcut("t", modifiers: [.command, .option])
         }
     }
 
@@ -296,9 +283,35 @@ struct SidebarView: View {
     private func tagRow(_ tag: Tag) -> some View {
         let tagId = tag.id ?? -1
         let isSelected = viewModel.selectedTagIds.contains(tagId)
+        let isEditing = viewModel.renamingTagId == tagId
         return HStack {
-            Label(tag.name, systemImage: "tag")
-                .foregroundStyle(isSelected ? .primary : .primary)
+            if isEditing {
+                TextField("Tag name", text: $viewModel.tagRenameText)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color.accentColor, lineWidth: 2)
+                    )
+                    .focused($isTagRenameFocused)
+                    .onSubmit { commitTagRename(tag) }
+                    .onExitCommand { cancelTagRename() }
+                    .onAppear {
+                        viewModel.isEditingText = true
+                        DispatchQueue.main.async {
+                            isTagRenameFocused = true
+                        }
+                    }
+                    .onDisappear {
+                        viewModel.isEditingText = false
+                    }
+            } else {
+                Label(tag.name, systemImage: "tag")
+                    .foregroundStyle(isSelected ? .primary : .primary)
+            }
             Spacer()
             Text("\(viewModel.tagCounts[tagId] ?? 0)")
                 .font(.caption2)
@@ -318,7 +331,38 @@ struct SidebarView: View {
         .onTapGesture {
             handleTagTap(tag)
         }
+        .onTapGesture(count: 2) {
+            startTagRename(tag)
+        }
         .selectionDisabled()
+    }
+
+    private func startTagRename(_ tag: Tag) {
+        guard let tagId = tag.id else { return }
+        viewModel.renamingTagId = tagId
+        viewModel.tagRenameText = tag.name
+        viewModel.isEditingText = true
+        DispatchQueue.main.async {
+            isTagRenameFocused = true
+        }
+    }
+
+    private func commitTagRename(_ tag: Tag) {
+        let trimmed = viewModel.tagRenameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            cancelTagRename()
+            return
+        }
+        viewModel.renamingTagId = nil
+        viewModel.tagRenameText = ""
+        viewModel.isEditingText = false
+        Task { await viewModel.renameTag(tag, to: trimmed) }
+    }
+
+    private func cancelTagRename() {
+        viewModel.renamingTagId = nil
+        viewModel.tagRenameText = ""
+        viewModel.isEditingText = false
     }
 
     private func handleTagTap(_ tag: Tag) {
@@ -328,32 +372,22 @@ struct SidebarView: View {
         if cmdHeld {
             if viewModel.selectedTagIds.contains(tagId) {
                 viewModel.selectedTagIds.remove(tagId)
-                if viewModel.selectedTagIds.isEmpty {
-                    viewModel.sidebarFilter = .all
-                }
             } else {
                 viewModel.selectedTagIds.insert(tagId)
-                viewModel.sidebarFilter = .tags
             }
         } else {
             if viewModel.selectedTagIds == [tagId] {
                 viewModel.selectedTagIds = []
-                viewModel.sidebarFilter = .all
             } else {
                 viewModel.selectedTagIds = [tagId]
-                viewModel.sidebarFilter = .tags
             }
         }
     }
 
     @ViewBuilder
     private func tagContextMenu(_ tag: Tag) -> some View {
-        Button("Rename Tag...") {
-            renamingTag = tag
-            renameText = tag.name
-            DispatchQueue.main.async {
-                showRenameTag = true
-            }
+        Button("Rename Tag") {
+            startTagRename(tag)
         }
         Divider()
         Button("Delete Tag", role: .destructive) {
@@ -385,11 +419,11 @@ struct SidebarView: View {
         }
     }
 
-    private func sidebarRow(_ title: String, icon: String, count: Int) -> some View {
+    private func sidebarRow(_ title: String, icon: String, count: Int, unscanned: Bool = false) -> some View {
         HStack {
             Label(title, systemImage: icon)
             Spacer()
-            Text("\(count)")
+            Text(unscanned ? "—" : "\(count)")
                 .font(.caption2)
                 .fontWeight(.medium)
                 .padding(.horizontal, 6)

@@ -97,9 +97,8 @@ enum SidebarFilter: Hashable {
     case topRated
     case duplicates
     case corrupt
+    case missing
     case rating(Int)
-    case tag(Tag)
-    case tags
     case collection(VideoCollection)
 }
 
@@ -110,5 +109,6 @@ struct LibraryCounts {
     var topRated: Int = 0
     var duplicates: Int = 0
     var corrupt: Int = 0
+    var missing: Int = 0
     var byRating: [Int: Int] = [:]
 }

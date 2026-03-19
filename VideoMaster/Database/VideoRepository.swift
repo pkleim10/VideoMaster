@@ -13,16 +13,31 @@ struct VideoRepository {
     func search(_ query: String) async throws -> [Video] {
         try await dbPool.read { db in
             if query.isEmpty { return try Video.fetchAll(db) }
-            guard let pattern = FTS5Pattern(matchingAnyTokenIn: query) else {
-                return try Video.fetchAll(db)
-            }
+            let terms = query
+                .trimmingCharacters(in: .whitespaces)
+                .components(separatedBy: .whitespaces)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard !terms.isEmpty else { return try Video.fetchAll(db) }
+            // Contains (*term*), AND logic, case-insensitive — "coop" matches "Cooper"/"acoop", "bear coop" matches "Dale Cooper fights a bear"
+            let conditions = terms.map { _ in
+                "LOWER(fileName) LIKE ? ESCAPE '\\'"
+            }.joined(separator: " AND ")
+            let args = terms.map { "%\(Self.escapeLike($0))%".lowercased() }
             let sql = """
-                SELECT video.* FROM video
-                JOIN video_fts ON video_fts.rowid = video.id AND video_fts MATCH ?
-                ORDER BY video.dateAdded DESC
+                SELECT * FROM video
+                WHERE \(conditions)
+                ORDER BY dateAdded DESC
                 """
-            return try Video.fetchAll(db, sql: sql, arguments: [pattern])
+            return try Video.fetchAll(db, sql: sql, arguments: StatementArguments(args))
         }
+    }
+
+    /// Escapes % _ \ for use in SQLite LIKE patterns with ESCAPE '\\'
+    private static func escapeLike(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
     }
 
     func fetchByMinRating(_ rating: Int) async throws -> [Video] {
