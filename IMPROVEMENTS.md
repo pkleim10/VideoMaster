@@ -1,5 +1,7 @@
 # VideoMaster — Feature Analysis & Improvement Suggestions
 
+**User documentation:** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — getting started, everyday tasks, settings, shortcuts, and glossary (conversational tone; screenshot placeholders in [docs/images/](docs/images/)).
+
 ## Current Feature Set (Summary)
 
 **Library & Browsing:** Grid/List views, sortable columns, search (filename only), sidebar filters (All, Recently Added, Recently Played, Top Rated, Corrupt), collections with rule-based membership, tag filtering (multi-select, AND/ANY).
@@ -16,13 +18,17 @@
 
 ### Polish & UX
 
-1. **Keyboard shortcuts** — Document and add shortcuts for common actions (e.g. Cmd+Delete for delete, Cmd+O for open in Finder, Cmd+E for external play).
-
-2. **Video notes** — Add an optional notes field per video for personal annotations.
+1. **Video notes** — Add an optional notes field per video for personal annotations.
 
 ### Future / Larger Scope
 
-3. **Custom metadata** — User-defined key-value metadata (e.g. "Director", "Location").
+2. **Custom metadata** — User-defined key-value metadata (e.g. "Director", "Location").
 
-4. **Full documentation (web-based)** — Comprehensive user and developer documentation hosted on the web.
+3. **Full documentation (web-based)** — Comprehensive user and developer documentation hosted on the web.
+
+---
+
+### Completed
+
+- **Keyboard shortcuts** — Done. Menu commands include Cmd+Delete (delete), Cmd+Shift+R (remove from library), Cmd+Return (play in external player), Cmd+Shift+O (add folder), Cmd+Shift+S (Surprise Me), Cmd+Option+T (clear tag filters), and others; discoverable in the menu bar when a library is open.
 

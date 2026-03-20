@@ -59,8 +59,18 @@ final class ThumbnailService: @unchecked Sendable {
     private let inflightLock = NSLock()
     private var inflightThumbnails: [String: Task<URL, Error>] = [:]
     private var inflightFilmstrips: [String: Task<NSImage, Error>] = [:]
+    private var inflightDetailPreviews: [String: Task<URL, Error>] = [:]
 
     private static let filmstripCachePrefix = "_filmstrip"
+    private static let detailPreviewCachePrefix = "_detailPreview"
+
+    /// Presets for detail-pane JPEG long edge (Settings → Video; keep in sync with the picker there).
+    static let detailPreviewLongEdgeChoices: [Int] = [480, 720, 1080, 1440, 2160]
+
+    static func normalizedDetailLongEdge(_ value: Int) -> Int {
+        if detailPreviewLongEdgeChoices.contains(value) { return value }
+        return 1080
+    }
 
     init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -70,16 +80,39 @@ final class ThumbnailService: @unchecked Sendable {
         memoryCache.countLimit = 5000
     }
 
-    func thumbnailURL(for filePath: String) -> URL {
+    private func pathHashString(for filePath: String) -> String {
         let hash = SHA256.hash(data: Data(filePath.utf8))
-        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-        return cacheDirectory.appendingPathComponent("\(hashString).jpg")
+        return hash.compactMap { String(format: "%02x", $0) }.joined()
+    }
+
+    func thumbnailURL(for filePath: String) -> URL {
+        cacheDirectory.appendingPathComponent("\(pathHashString(for: filePath)).jpg")
     }
 
     func filmstripURL(for filePath: String) -> URL {
-        let hash = SHA256.hash(data: Data(filePath.utf8))
-        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-        return cacheDirectory.appendingPathComponent("\(hashString)_filmstrip.jpg")
+        cacheDirectory.appendingPathComponent("\(pathHashString(for: filePath))_filmstrip.jpg")
+    }
+
+    /// Disk path for hi-res detail still: `<hash>_detail_<longEdge>.jpg`.
+    func detailPreviewURL(for filePath: String, longEdge: Int) -> URL {
+        let edge = Self.normalizedDetailLongEdge(longEdge)
+        let h = pathHashString(for: filePath)
+        return cacheDirectory.appendingPathComponent("\(h)_detail_\(edge).jpg")
+    }
+
+    /// Pre–width-suffix cache file (`<hash>_detail.jpg`, treated as 1080 long edge when reading).
+    private func legacyDetailPreviewURL(for filePath: String) -> URL {
+        let h = pathHashString(for: filePath)
+        return cacheDirectory.appendingPathComponent("\(h)_detail.jpg")
+    }
+
+    private func detailPreviewMemoryKey(filePath: String, longEdge: Int) -> NSString {
+        let edge = Self.normalizedDetailLongEdge(longEdge)
+        return (filePath + Self.detailPreviewCachePrefix + "_\(edge)") as NSString
+    }
+
+    private func inflightDetailPreviewKey(filePath: String, longEdge: Int) -> String {
+        "\(filePath)\u{1e}\(Self.normalizedDetailLongEdge(longEdge))"
     }
 
     // MARK: - Fast path (memory + disk; never waits on AV / generation)
@@ -109,6 +142,28 @@ final class ThumbnailService: @unchecked Sendable {
         else { return nil }
         memoryCache.setObject(image, forKey: memKey)
         return image
+    }
+
+    /// Hi-res detail preview on disk (`<hash>_detail_<longEdge>.jpg`) + `NSCache` keyed by path and long edge.
+    func loadDetailPreview(for filePath: String, longEdge: Int) -> NSImage? {
+        let edge = Self.normalizedDetailLongEdge(longEdge)
+        let memKey = detailPreviewMemoryKey(filePath: filePath, longEdge: edge)
+        if let cached = memoryCache.object(forKey: memKey) {
+            return cached
+        }
+        var urls = [detailPreviewURL(for: filePath, longEdge: edge)]
+        if edge == 1080 {
+            let legacy = legacyDetailPreviewURL(for: filePath)
+            if legacy.path != urls[0].path { urls.append(legacy) }
+        }
+        for url in urls {
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let image = NSImage(contentsOf: url)
+            else { continue }
+            memoryCache.setObject(image, forKey: memKey)
+            return image
+        }
+        return nil
     }
 
     // MARK: - Generation (async; can run concurrently for different files)
@@ -196,6 +251,128 @@ final class ThumbnailService: @unchecked Sendable {
 
         try jpegData.write(to: cacheURL)
         memoryCache.setObject(nsImage, forKey: video.filePath as NSString)
+        return cacheURL
+    }
+
+    // MARK: - Detail preview (disk + memory; long edge from settings)
+
+    /// Loads cached detail JPEG from disk/memory, or generates once and persists under `~/Library/Caches/.../VideoMaster/thumbnails/`.
+    func detailPreviewImage(for video: Video, longEdge: Int) async -> NSImage? {
+        let path = video.filePath
+        let edge = Self.normalizedDetailLongEdge(longEdge)
+        if let img = loadDetailPreview(for: path, longEdge: edge) { return img }
+        guard (try? await generateDetailPreview(for: video, longEdge: edge)) != nil else { return nil }
+        return loadDetailPreview(for: path, longEdge: edge)
+    }
+
+    func generateDetailPreview(for video: Video, longEdge: Int) async throws -> URL {
+        let edge = Self.normalizedDetailLongEdge(longEdge)
+        let cacheURL = detailPreviewURL(for: video.filePath, longEdge: edge)
+        let memKey = detailPreviewMemoryKey(filePath: video.filePath, longEdge: edge)
+
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            if let image = NSImage(contentsOf: cacheURL) {
+                memoryCache.setObject(image, forKey: memKey)
+            }
+            return cacheURL
+        }
+
+        if edge == 1080 {
+            let legacyURL = legacyDetailPreviewURL(for: video.filePath)
+            if FileManager.default.fileExists(atPath: legacyURL.path) {
+                if let image = NSImage(contentsOf: legacyURL) {
+                    memoryCache.setObject(image, forKey: memKey)
+                }
+                return legacyURL
+            }
+        }
+
+        return try await coalescedDetailPreviewGeneration(for: video, filePath: video.filePath, longEdge: edge)
+    }
+
+    private func coalescedDetailPreviewGeneration(for video: Video, filePath: String, longEdge: Int) async throws -> URL {
+        let coalesceKey = inflightDetailPreviewKey(filePath: filePath, longEdge: longEdge)
+        inflightLock.lock()
+        if let existing = inflightDetailPreviews[coalesceKey] {
+            inflightLock.unlock()
+            return try await existing.value
+        }
+        let task = Task<URL, Error> {
+            await self.generationGate.acquire()
+            do {
+                let url = try await self.generateDetailPreviewWork(for: video, longEdge: longEdge)
+                await self.generationGate.release()
+                return url
+            } catch {
+                await self.generationGate.release()
+                throw error
+            }
+        }
+        inflightDetailPreviews[coalesceKey] = task
+        inflightLock.unlock()
+        defer {
+            inflightLock.lock()
+            inflightDetailPreviews.removeValue(forKey: coalesceKey)
+            inflightLock.unlock()
+        }
+        return try await task.value
+    }
+
+    private func generateDetailPreviewWork(for video: Video, longEdge: Int) async throws -> URL {
+        let edge = Self.normalizedDetailLongEdge(longEdge)
+        let cacheURL = detailPreviewURL(for: video.filePath, longEdge: edge)
+        let memKey = detailPreviewMemoryKey(filePath: video.filePath, longEdge: edge)
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            if let image = NSImage(contentsOf: cacheURL) {
+                memoryCache.setObject(image, forKey: memKey)
+            }
+            return cacheURL
+        }
+
+        if edge == 1080 {
+            let legacyURL = legacyDetailPreviewURL(for: video.filePath)
+            if FileManager.default.fileExists(atPath: legacyURL.path) {
+                if let image = NSImage(contentsOf: legacyURL) {
+                    memoryCache.setObject(image, forKey: memKey)
+                }
+                return legacyURL
+            }
+        }
+
+        let url = video.url
+        let dim = CGFloat(edge)
+        let nsImage: NSImage = try await withTimeout(seconds: 15) {
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: dim, height: dim)
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 3, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 3, preferredTimescale: 600)
+
+            var targetSeconds: Double = 5.0
+            if let d = try? await asset.load(.duration) {
+                let total = CMTimeGetSeconds(d)
+                if total.isFinite && total > 0 {
+                    targetSeconds = min(total * 0.1, 30)
+                }
+            }
+            let time = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+            let (cgImage, _) = try await generator.image(at: time)
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }
+
+        guard let tiffData = nsImage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let jpegData = bitmap.representation(
+                  using: .jpeg,
+                  properties: [.compressionFactor: 0.82]
+              )
+        else {
+            throw ThumbnailError.encodingFailed
+        }
+
+        try jpegData.write(to: cacheURL)
+        memoryCache.setObject(nsImage, forKey: memKey)
         return cacheURL
     }
 
@@ -370,6 +547,27 @@ final class ThumbnailService: @unchecked Sendable {
         if FileManager.default.fileExists(atPath: oldFilmstripURL.path) {
             try? FileManager.default.moveItem(at: oldFilmstripURL, to: newFilmstripURL)
         }
+        let oldH = pathHashString(for: oldFilePath)
+        let newH = pathHashString(for: newFilePath)
+        let fm = FileManager.default
+        if let contents = try? fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) {
+            for url in contents {
+                let name = url.lastPathComponent
+                guard name.hasPrefix(oldH) else { continue }
+                if name == "\(oldH)_detail.jpg" {
+                    let dest = cacheDirectory.appendingPathComponent("\(newH)_detail_1080.jpg")
+                    if !fm.fileExists(atPath: dest.path) {
+                        try? fm.moveItem(at: url, to: dest)
+                    }
+                    continue
+                }
+                guard name.hasPrefix("\(oldH)_detail_"), name.hasSuffix(".jpg") else { continue }
+                let rest = String(name.dropFirst(oldH.count))
+                let newName = "\(newH)\(rest)"
+                let newURL = cacheDirectory.appendingPathComponent(newName)
+                try? fm.moveItem(at: url, to: newURL)
+            }
+        }
         let oldKey = oldFilePath as NSString
         let newKey = newFilePath as NSString
         if let image = memoryCache.object(forKey: oldKey) {
@@ -381,6 +579,15 @@ final class ThumbnailService: @unchecked Sendable {
         if let image = memoryCache.object(forKey: oldFsKey) {
             memoryCache.setObject(image, forKey: newFsKey)
             memoryCache.removeObject(forKey: oldFsKey)
+        }
+        memoryCache.removeObject(forKey: (oldFilePath + Self.detailPreviewCachePrefix) as NSString)
+        for edge in Self.detailPreviewLongEdgeChoices {
+            let oldDetailKey = detailPreviewMemoryKey(filePath: oldFilePath, longEdge: edge)
+            let newDetailKey = detailPreviewMemoryKey(filePath: newFilePath, longEdge: edge)
+            if let image = memoryCache.object(forKey: oldDetailKey) {
+                memoryCache.setObject(image, forKey: newDetailKey)
+                memoryCache.removeObject(forKey: oldDetailKey)
+            }
         }
     }
 

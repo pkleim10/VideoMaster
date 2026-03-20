@@ -150,6 +150,18 @@ struct VideoSettingsView: View {
             } footer: {
                 Text("Surprise Me updates selection immediately, loads or generates the filmstrip for the detail pane, then starts auto-play if enabled, then scrolls the grid or list to the selection.")
             }
+
+            Section {
+                Picker("Maximum large preview thumbnail (long-edge)", selection: $viewModel.detailPreviewMaxLongEdge) {
+                    ForEach(ThumbnailService.detailPreviewLongEdgeChoices, id: \.self) { w in
+                        Text("\(w) px").tag(w)
+                    }
+                }
+            } header: {
+                Text("Detail Pane Preview")
+            } footer: {
+                Text("Maximum width or height (long edge) for the disk-backed hi-res still when Thumbnail is selected. Larger values use more cache space. Grid and list thumbnails stay 400 px.")
+            }
         }
         .formStyle(.grouped)
         .padding()

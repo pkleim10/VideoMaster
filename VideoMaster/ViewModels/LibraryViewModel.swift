@@ -153,6 +153,7 @@ final class LibraryViewModel {
     private static let excludeCorruptKey = "VideoMaster.excludeCorrupt"
     private static let confirmDeletionsKey = "VideoMaster.confirmDeletions"
     private static let showThumbnailInDetailKey = "VideoMaster.showThumbnailInDetail"
+    private static let detailPreviewMaxLongEdgeKey = "VideoMaster.detailPreviewMaxLongEdge"
     private static let browsingLayoutKey = "VideoMaster.browsingLayout"
     private static let playbackLayoutKey = "VideoMaster.playbackLayout"
     private static let filmstripRowsKey = "VideoMaster.filmstripRows"
@@ -295,6 +296,13 @@ final class LibraryViewModel {
     var showThumbnailInDetail: Bool = true {
         didSet {
             UserDefaults.standard.set(showThumbnailInDetail, forKey: Self.showThumbnailInDetailKey)
+        }
+    }
+
+    /// Long edge (px) for disk-backed hi-res still in the detail pane (`ThumbnailService`); not the 400px grid thumb.
+    var detailPreviewMaxLongEdge: Int = 1080 {
+        didSet {
+            UserDefaults.standard.set(detailPreviewMaxLongEdge, forKey: Self.detailPreviewMaxLongEdgeKey)
         }
     }
 
@@ -509,6 +517,11 @@ final class LibraryViewModel {
         if let ids = defaults.stringArray(forKey: Self.missingVideoIdsKey) { missingVideoIds = Set(ids) }
         if defaults.object(forKey: Self.showThumbnailInDetailKey) != nil {
             showThumbnailInDetail = defaults.bool(forKey: Self.showThumbnailInDetailKey)
+        }
+        if let edge = defaults.object(forKey: Self.detailPreviewMaxLongEdgeKey) as? Int,
+           ThumbnailService.detailPreviewLongEdgeChoices.contains(edge)
+        {
+            detailPreviewMaxLongEdge = edge
         }
 
         // Load layouts (with migration from legacy keys)

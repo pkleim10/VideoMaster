@@ -9,7 +9,10 @@ struct VideoDetailView: View {
     @State private var newTagName: String = ""
     @State private var isCreatingTag = false
     @FocusState private var isTagFieldFocused: Bool
-    @State private var thumbnail: NSImage?
+    /// Grid/list-sized preview (400); shown immediately in detail.
+    @State private var detailThumbnailLo: NSImage?
+    /// Session-only hi-res detail still (long edge from settings); replaces lo when ready.
+    @State private var detailThumbnailHi: NSImage?
     @State private var filmstrip: NSImage?
     @State private var filmstripRows: Int = 2
     @State private var filmstripColumns: Int = 4
@@ -27,7 +30,7 @@ struct VideoDetailView: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if !viewModel.isPlayingInline, (thumbnail != nil || filmstrip != nil) {
+                    if !viewModel.isPlayingInline, (detailThumbnailLo != nil || detailThumbnailHi != nil || filmstrip != nil) {
                         Picker("", selection: $viewModel.showThumbnailInDetail) {
                             Text("Thumbnail").tag(true)
                             Text("Filmstrip").tag(false)
@@ -74,7 +77,8 @@ struct VideoDetailView: View {
             isEditingName = false
             viewModel.isEditingText = false
             filmstrip = nil
-            thumbnail = nil
+            detailThumbnailLo = nil
+            detailThumbnailHi = nil
             await loadData()
             // Extra yield so inline player / tap & Space handlers run before grid scroll is scheduled.
             await Task.yield()
@@ -87,6 +91,12 @@ struct VideoDetailView: View {
                 if let fs = filmstrip {
                     inferFilmstripGrid(from: fs)
                 }
+            }
+        }
+        .onChange(of: viewModel.detailPreviewMaxLongEdge) { _, _ in
+            Task { @MainActor in
+                detailThumbnailHi = nil
+                scheduleDetailPreviewLoad(for: resolvedVideo)
             }
         }
     }
@@ -143,21 +153,22 @@ struct VideoDetailView: View {
 
     private func thumbnailSection(maxHeight: CGFloat) -> some View {
         let preferThumbnail = viewModel.showThumbnailInDetail
+        let detailStill = detailThumbnailHi ?? detailThumbnailLo
 
         return ZStack {
                 if viewModel.isPlayingInline, let player = inlinePlayer {
                     FloatingPlayerView(player: player)
                         .aspectRatio(16.0 / 9.0, contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else if preferThumbnail, let thumbnail {
-                    Image(nsImage: thumbnail)
+                } else if preferThumbnail, let detailStill {
+                    Image(nsImage: detailStill)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else if let filmstrip {
                     filmstripImage(filmstrip)
-                } else if let thumbnail {
-                    Image(nsImage: thumbnail)
+                } else if let detailStill {
+                    Image(nsImage: detailStill)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -401,7 +412,7 @@ struct VideoDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Rating")
                     .font(.headline)
-                RatingView(rating: isMultiSelect ? (commonValue(\.rating) ?? 0) : video.rating, size: 20) { newRating in
+                RatingView(rating: isMultiSelect ? (commonValue(\.rating) ?? 0) : resolvedVideo.rating, size: 20) { newRating in
                     let ids = selectedIds
                     viewModel.applyRating(to: ids, rating: newRating)
                     Task { await viewModel.persistRating(for: ids, rating: newRating) }
@@ -526,7 +537,7 @@ struct VideoDetailView: View {
             service.loadThumbnail(for: path)
         }.value
         filmstrip = await filmstripLoaded
-        thumbnail = await thumbnailLoaded
+        detailThumbnailLo = await thumbnailLoaded
         if let fs = filmstrip {
             inferFilmstripGrid(from: fs)
         }
@@ -553,12 +564,30 @@ struct VideoDetailView: View {
         }
 
         tags = viewModel.tagsForVideos(selectedIds)
+
+        scheduleDetailPreviewLoad(for: resolvedVideo)
+    }
+
+    /// Disk-backed hi-res still (long edge from settings); 400px shows first, then swaps when JPEG is ready.
+    private func scheduleDetailPreviewLoad(for videoForPreview: Video) {
+        let stableId = videoForPreview.id
+        let longEdge = viewModel.detailPreviewMaxLongEdge
+        Task(priority: .userInitiated) {
+            guard let large = await thumbnailService.detailPreviewImage(for: videoForPreview, longEdge: longEdge) else { return }
+            await MainActor.run {
+                let primary = viewModel.lastSelectedVideoId ?? viewModel.selectedVideoIds.first
+                let stillSelected = primary == stableId || viewModel.selectedVideoIds.contains(stableId)
+                guard stillSelected else { return }
+                detailThumbnailHi = large
+            }
+        }
     }
 
     private func generateThumbnailIfNeeded() async {
-        guard thumbnail == nil else { return }
-        if let url = try? await thumbnailService.generateThumbnail(for: video) {
-            thumbnail = NSImage(contentsOf: url)
+        guard detailThumbnailLo == nil else { return }
+        let v = resolvedVideo
+        if let url = try? await thumbnailService.generateThumbnail(for: v) {
+            detailThumbnailLo = NSImage(contentsOf: url)
         }
     }
 
@@ -588,13 +617,21 @@ struct VideoDetailView: View {
         return ids.isEmpty ? [video.id] : ids
     }
 
+    /// Latest row from the view model. The `video` parameter can go stale because the detail
+    /// `NSHostingView` often keeps the same SwiftUI root when the selection id is unchanged.
+    private var resolvedVideo: Video {
+        viewModel.videos.first(where: { $0.id == video.id }) ?? video
+    }
+
     private var isMultiSelect: Bool {
         viewModel.selectedVideoIds.count > 1
     }
 
     private var selectedVideos: [Video] {
         let ids = selectedIds
-        return viewModel.filteredVideos.filter { ids.contains($0.id) }
+        // Use `videos` (not `filteredVideos`) so rating and other fields update immediately after
+        // `applyRating`; filtered list is refreshed asynchronously.
+        return ids.compactMap { id in viewModel.videos.first(where: { $0.id == id }) }
     }
 
     private func commonValue<T: Equatable>(_ keyPath: KeyPath<Video, T>) -> T? {
