@@ -78,7 +78,7 @@ VideoMaster only knows about videos inside **folders you add**.
 Use the **segmented control** in the toolbar:
 
 - **Grid** — visual thumbnails; great for skimming.
-- **List** — sortable columns; great for names, dates, and batch selection.
+- **List** — sortable columns; great for names, dates, and batch selection. Changing sort (toolbar or column headers) clears multi-selection; with exactly one video selected, the grid or list scrolls to that item.
 
 Your choice is remembered.
 

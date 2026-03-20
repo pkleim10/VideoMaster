@@ -39,6 +39,14 @@ final class LibraryViewModel {
                 return
             }
             guard oldSort != newSort || oldValue.first?.order != tableSortOrder.first?.order else { return }
+            if selectedVideoIds.count > 1 {
+                pendingScrollAfterSortId = nil
+                selectedVideoIds = []
+            } else if selectedVideoIds.count == 1 {
+                pendingScrollAfterSortId = selectedVideoIds.first
+            } else {
+                pendingScrollAfterSortId = nil
+            }
             recomputeFilteredVideos()
             savePreferences()
         }
@@ -103,6 +111,8 @@ final class LibraryViewModel {
     var scrollToSelectedOnViewSwitch: Bool = false
     /// Set by renameVideo when sorted by name; consumed by applyFilteredVideos to scroll in same cycle as bump.
     var pendingScrollToAfterRename: String?
+    /// Set when sort changes with exactly one selected row; consumed in `applyFilteredVideos` to scroll after reorder.
+    private var pendingScrollAfterSortId: String?
     var pendingDeleteIds: Set<String> = []
     var showDeleteConfirmation: Bool = false
 
@@ -812,6 +822,13 @@ final class LibraryViewModel {
             }
         } else if pendingScrollToAfterRename != nil {
             pendingScrollToAfterRename = nil
+        }
+
+        if let sortScrollId = pendingScrollAfterSortId {
+            pendingScrollAfterSortId = nil
+            if newValue.contains(where: { $0.id == sortScrollId }) {
+                scrollToVideoId = sortScrollId
+            }
         }
     }
 

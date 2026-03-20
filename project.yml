@@ -22,8 +22,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.videomaster.VideoMaster
-        MARKETING_VERSION: "0.6.7"
-        CURRENT_PROJECT_VERSION: "183"
+        MARKETING_VERSION: "0.6.8"
+        CURRENT_PROJECT_VERSION: "185"
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
         INFOPLIST_KEY_CFBundleDisplayName: VideoMaster
