@@ -9,11 +9,11 @@ This document is an **exhaustive** pass over what makes **library grid** mode ex
 | Area | Severity | Notes |
 |------|----------|--------|
 | **`ThumbnailService` (was a single `actor`)** | **Was critical** | **Fixed:** `ThumbnailService` is now a **class** with thread-safe `NSCache`; fast `load*` no longer queues behind `generate*`. Detail pane loads are no longer stuck behind hundreds of grid thumbnail jobs. |
-| **Full-tree teardown on `filteredVideosVersion`** | **High** | `.id(filteredVideosVersion)` on the grid **and** `contentID` including the same version → **entire** grid (and often entire content `NSHostingView`) replaced; **all** `@State` in cells (e.g. decoded `NSImage`) discarded → **re-hit** thumbnail pipeline. |
-| **`ForEach(Array(filteredVideos.enumerated()))`** | **Medium–High** | **O(n) allocation** on **every** `body` refresh of the parent; amplifies any frequent invalidation. |
-| **`@Bindable` / full `LibraryViewModel` in every cell** | **Medium** | Each `VideoGridCell` is wired to the whole observable model (`renamingVideoId`, `renameText`, `videoRepo`, …). Broad invalidations can fan out to **many** cells. |
+| **Full-tree teardown on `filteredVideosVersion`** | **Improved** | Version bumps only when filtered **membership** changes (add/remove/rename id), **not** pure sort/reorder — same video set reorders in place without nuking every cell. `.id` + `contentID` still replace the tree when rows enter/leave the list. |
+| **`ForEach(Array(filteredVideos.enumerated()))`** | **Fixed** | **Was** Θ(n) per parent refresh; **now** `ForEach(filteredVideos)`. |
+| **`@Bindable` / full `LibraryViewModel` in every cell** | **Improved (P2)** | **`VideoGridCell`** no longer `@Bindable`; narrow inputs + rename binding only for active row. Parent grid still observes full VM. |
 | **`ScrollView` + `scrollPosition(id:)` + lazy grid** | **Medium** | Programmatic scroll/sync can still force **layout / identity** work on the lazy container (see §6). |
-| **`ScrollbarEnabler` 1s repeating timer** | **Low–Medium** | `flashScrollers()` every second → unnecessary layout / scroller work while the grid is visible. |
+| **`ScrollbarEnabler` 1s repeating timer** | **Fixed** | No repeating `flashScrollers()`. |
 | **Native list virtualization** | **Architectural** | `Table` / `NSTableView` **virtualizes** rows; `LazyVGrid` still creates **many** more SwiftUI subtrees and image views per “screenful”. |
 
 ---
@@ -44,6 +44,8 @@ LibraryListView:  .id(viewModel.filteredVideosVersion)
 ```
 
 When the version increments, SwiftUI treats the subtree as a **new** identity: **destroys** child state, **recreates** `LazyVGrid` children, **re-runs** `.task` for thumbnails, etc.
+
+**Sort / reorder:** `applyFilteredVideos` bumps the version only when `Set(video.id)` changes — **not** when the same videos are only reordered (e.g. table sort).
 
 **Interaction with `contentID`:** For the same version bump, you can get **both** a new hosting `rootView` **and** an `.id` tear-down — redundant churn.
 
@@ -101,8 +103,7 @@ File: `LibraryGridView.swift`.
 Each cell includes:
 
 - **Heavy layout:** thumbnail area, duration badge, filename, optional metadata row, stars (`ForEach(0..<rating)`).
-- **`@Bindable var viewModel`** — entire `LibraryViewModel` in **every** cell.
-- **`TextField` bound to `$viewModel.renameText`** only when renaming, but type still carries full observable wiring.
+- **P2 (partial):** `VideoGridCell` no longer uses **`@Bindable var viewModel`**. It takes **`isRenaming`**, **`renameText`** (`.constant("")` when not the rename row), **`videoRepo`**, and small callbacks — so cells are not wired to **every** `LibraryViewModel` change (scan strings, sidebar, etc.). The **parent** `LibraryGridView` still observes the full model.
 - **`onHover`** → state updates on mouse moves (many cells).
 - **Two `onTapGesture` layers** + **`contextMenu`** building `Menu("Open With")` with **`urlsForApplications`** (filesystem hit) **per menu open**, not per frame — OK, but context menu closure captures `video`.
 
@@ -161,8 +162,8 @@ File: `ResizableSplitView.swift`.
 
 ### P2 — Cell granularity
 
-1. Replace **`@Bindable var viewModel`** in cells with **narrow** inputs: `isSelected`, `isRenamingThisRow`, callbacks, optional `Binding` only for the one row being renamed.
-2. Replace `Array(enumerated())` with plain `ForEach(videos)`.
+1. **`VideoGridCell`:** narrow inputs (no `@Bindable` VM) — **done**.
+2. **Grid `ForEach`:** no `Array(enumerated())` — **done**. Optional: same **narrow observation** for **list** rows if profiling warrants it.
 
 ### P3 — Scroll / scroller hygiene
 

@@ -758,10 +758,12 @@ final class LibraryViewModel {
     }
 
     private func applyFilteredVideos(_ newValue: [Video]) {
-        // Only bump version when structure changes (add/remove/reorder), not on rename.
-        // Rename changes filePath (id) but keeps same databaseId order — avoid view recreation to preserve scroll.
-        let structureChanged = newValue.count != filteredVideos.count ||
-            newValue.map(\.databaseId) != filteredVideos.map(\.databaseId)
+        // Bump `.id(filteredVideosVersion)` / `contentID` only when the **set** of rows changes — not on pure
+        // **reorder** (e.g. column sort). Reorder used to compare full `databaseId` arrays → always "changed" →
+        // full grid teardown + every `.task` thumbnail re-fired → multi‑second stalls on large libraries.
+        let oldSet = Set(filteredVideos.map(\.id))
+        let newSet = Set(newValue.map(\.id))
+        let structureChanged = oldSet != newSet
         filteredVideos = newValue
         if structureChanged {
             filteredVideosVersion &+= 1

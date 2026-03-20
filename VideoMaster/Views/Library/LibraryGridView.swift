@@ -72,15 +72,19 @@ struct LibraryGridView: View {
                     ScrollView(.vertical) {
                         LazyVGrid(columns: cols, spacing: viewModel.gridSize.gridSpacing) {
                             ForEach(viewModel.filteredVideos) { video in
+                                let renamingRow = viewModel.renamingVideoId == video.id
                                 VideoGridCell(
                                     video: video,
                                     isSelected: viewModel.selectedVideoIds.contains(video.id),
+                                    isRenaming: renamingRow,
+                                    renameText: renamingRow ? $viewModel.renameText : .constant(""),
                                     gridSize: viewModel.gridSize,
-                                    viewModel: viewModel,
+                                    videoRepo: viewModel.videoRepo,
                                     thumbnailService: thumbnailService,
                                     renameFocus: $isRenameFocused,
                                     onCommitRename: { commitRename(video) },
-                                    onCancelRename: cancelRename
+                                    onCancelRename: cancelRename,
+                                    onRenameEditingChanged: { viewModel.isEditingText = $0 }
                                 )
                                 .background(Color.clear.id(video.id))
                                 .contentShape(Rectangle())
@@ -269,15 +273,20 @@ struct LibraryGridView: View {
     }
 }
 
+/// P2: no `@Bindable LibraryViewModel` — avoids fan-out invalidation across thousands of cells when
+/// unrelated VM properties change (toolbar, scan progress, detail, etc.).
 struct VideoGridCell: View {
     let video: Video
     let isSelected: Bool
+    let isRenaming: Bool
+    @Binding var renameText: String
     let gridSize: GridSize
-    @Bindable var viewModel: LibraryViewModel
+    let videoRepo: VideoRepository
     let thumbnailService: ThumbnailService
     var renameFocus: FocusState<Bool>.Binding
     var onCommitRename: () -> Void
     var onCancelRename: () -> Void
+    var onRenameEditingChanged: (Bool) -> Void
     @State private var thumbnail: NSImage?
     @State private var isHovering = false
 
@@ -306,8 +315,8 @@ struct VideoGridCell: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                if viewModel.renamingVideoId == video.id {
-                    TextField("", text: $viewModel.renameText)
+                if isRenaming {
+                    TextField("", text: $renameText)
                         .textFieldStyle(.plain)
                         .font(gridSize == .small ? .system(size: 10) : .caption)
                         .fontWeight(.medium)
@@ -323,10 +332,10 @@ struct VideoGridCell: View {
                         .onSubmit { onCommitRename() }
                         .onExitCommand { onCancelRename() }
                         .onAppear {
-                            viewModel.isEditingText = true
+                            onRenameEditingChanged(true)
                         }
                         .onDisappear {
-                            viewModel.isEditingText = false
+                            onRenameEditingChanged(false)
                         }
                 } else {
                     Text(video.fileName)
@@ -409,7 +418,7 @@ struct VideoGridCell: View {
             let url = try await thumbnailService.generateThumbnail(for: video)
             thumbnail = NSImage(contentsOf: url)
             if let dbId = video.databaseId {
-                let repo = viewModel.videoRepo
+                let repo = videoRepo
                 let path = url.path
                 Task {
                     try? await repo.updateThumbnailPath(videoId: dbId, path: path)
