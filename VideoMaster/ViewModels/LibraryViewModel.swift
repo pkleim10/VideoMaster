@@ -43,8 +43,18 @@ final class LibraryViewModel {
             savePreferences()
         }
     }
-    var viewMode: ViewMode = .grid
-    var gridSize: GridSize = .medium
+    var viewMode: ViewMode = .grid {
+        didSet {
+            guard !_applyingLayout else { return }
+            updateCurrentLayoutFromLive()
+        }
+    }
+    var gridSize: GridSize = .medium {
+        didSet {
+            guard !_applyingLayout else { return }
+            updateCurrentLayoutFromLive()
+        }
+    }
     var sidebarFilter: SidebarFilter? = .all {
         didSet { recomputeFilteredVideos() }
     }
@@ -60,6 +70,11 @@ final class LibraryViewModel {
     var scanTotal: Int = 0
     var selectedVideoIds: Set<String> = [] {
         didSet {
+            if let pending = pendingSurpriseScrollVideoId {
+                if selectedVideoIds.count != 1 || selectedVideoIds.first != pending {
+                    pendingSurpriseScrollVideoId = nil
+                }
+            }
             let added = selectedVideoIds.subtracting(oldValue)
             if let newId = added.first {
                 lastSelectedVideoId = newId
@@ -73,6 +88,8 @@ final class LibraryViewModel {
     var lastSelectedVideoId: String?
     var filmstripRefreshId: Int = 0
     var isPlayingInline: Bool = false
+    /// Set before `isPlayingInline = true` on filmstrip tap; consumed when creating the inline player (Space leaves nil → start at 0).
+    var pendingFilmstripSeekSeconds: Double?
     var pendingAutoPlay: Bool = false
     var inlinePlayPauseToggle: Int = 0
     var isEditingText: Bool = false
@@ -81,6 +98,8 @@ final class LibraryViewModel {
     var renamingTagId: Int64?
     var tagRenameText: String = ""
     var scrollToVideoId: String?
+    /// Surprise Me: scroll browsing pane only after detail has finished (see `finishSurpriseScrollIfNeeded`).
+    private(set) var pendingSurpriseScrollVideoId: String?
     var scrollToSelectedOnViewSwitch: Bool = false
     /// Set by renameVideo when sorted by name; consumed by applyFilteredVideos to scroll in same cycle as bump.
     var pendingScrollToAfterRename: String?
@@ -134,9 +153,8 @@ final class LibraryViewModel {
     private static let excludeCorruptKey = "VideoMaster.excludeCorrupt"
     private static let confirmDeletionsKey = "VideoMaster.confirmDeletions"
     private static let showThumbnailInDetailKey = "VideoMaster.showThumbnailInDetail"
-    private static let detailHeightKey = "VideoMaster.detailHeight"
-    private static let sidebarExpandedKey = "VideoMaster.sidebarExpanded"
-    private static let columnCustomizationKey = "VideoMaster.columnCustomization"
+    private static let browsingLayoutKey = "VideoMaster.browsingLayout"
+    private static let playbackLayoutKey = "VideoMaster.playbackLayout"
     private static let filmstripRowsKey = "VideoMaster.filmstripRows"
     private static let filmstripColumnsKey = "VideoMaster.filmstripColumns"
     private static let lastAppliedFilmstripRowsKey = "VideoMaster.lastAppliedFilmstripRows"
@@ -280,40 +298,149 @@ final class LibraryViewModel {
         }
     }
 
-    var detailHeight: CGFloat = 336 {
+    // MARK: - Layout (browsing vs playback)
+
+    var browsingLayout: LayoutParams = .browsingDefaults() {
+        didSet { saveLayout(.browsing) }
+    }
+
+    var playbackLayout: LayoutParams? = nil {
+        didSet { saveLayout(.playback) }
+    }
+
+    private var _applyingLayout = false
+
+    /// Layout to use for the current mode. Playback uses browsing until user customizes during playback.
+    var effectiveLayout: LayoutParams {
+        if isPlayingInline {
+            return playbackLayout ?? browsingLayout
+        }
+        return browsingLayout
+    }
+
+    var effectiveDetailHeight: CGFloat { CGFloat(effectiveLayout.detailVideoHeight) }
+    var effectiveDetailWidth: CGFloat { CGFloat(effectiveLayout.detailWidth) }
+    var effectiveContentWidth: CGFloat { CGFloat(effectiveLayout.contentWidth) }
+    var effectiveSidebarWidth: CGFloat { CGFloat(effectiveLayout.sidebarWidth) }
+
+    var columnCustomization = TableColumnCustomization<Video>() {
         didSet {
-            UserDefaults.standard.set(Double(detailHeight), forKey: Self.detailHeightKey)
+            guard !_applyingLayout else { return }
+            updateCurrentLayoutFromLive()
         }
     }
 
-    var columnCustomization = TableColumnCustomization<Video>() {
-        didSet { saveColumnCustomization() }
+    var isLibraryExpanded: Bool = true {
+        didSet {
+            guard !_applyingLayout else { return }
+            updateCurrentLayoutFromLive()
+        }
+    }
+    var isCollectionsExpanded: Bool = true {
+        didSet {
+            guard !_applyingLayout else { return }
+            updateCurrentLayoutFromLive()
+        }
+    }
+    var isRatingExpanded: Bool = true {
+        didSet {
+            guard !_applyingLayout else { return }
+            updateCurrentLayoutFromLive()
+        }
+    }
+    var isTagsExpanded: Bool = true {
+        didSet {
+            guard !_applyingLayout else { return }
+            updateCurrentLayoutFromLive()
+        }
     }
 
-    private func saveColumnCustomization() {
-        guard let data = try? JSONEncoder().encode(columnCustomization) else { return }
-        UserDefaults.standard.set(data, forKey: Self.columnCustomizationKey)
+    private enum LayoutMode { case browsing, playback }
+    private var layoutSaveTask: DispatchWorkItem?
+
+    private func saveLayout(_ mode: LayoutMode) {
+        layoutSaveTask?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let layout: LayoutParams
+            switch mode {
+            case .browsing: layout = self.browsingLayout
+            case .playback: guard let p = self.playbackLayout else { return }; layout = p
+            }
+            guard let data = try? JSONEncoder().encode(layout) else { return }
+            let key = mode == .browsing ? Self.browsingLayoutKey : Self.playbackLayoutKey
+            UserDefaults.standard.set(data, forKey: key)
+        }
+        layoutSaveTask = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    var isLibraryExpanded: Bool = true { didSet { saveSidebarExpanded() } }
-    var isCollectionsExpanded: Bool = true { didSet { saveSidebarExpanded() } }
-    var isRatingExpanded: Bool = true { didSet { saveSidebarExpanded() } }
-    var isTagsExpanded: Bool = true { didSet { saveSidebarExpanded() } }
+    /// Apply a layout to the live UI properties. Call when switching modes.
+    /// When preserveViewModeAndGridSize is true (e.g. switching to playback), keeps current viewMode and gridSize
+    /// so the user stays in grid/list as they were, while applying sizes and sidebar from the layout.
+    func applyLayout(_ layout: LayoutParams, preserveViewModeAndGridSize: Bool = false) {
+        _applyingLayout = true
+        defer { _applyingLayout = false }
+        if !preserveViewModeAndGridSize {
+            if let mode = ViewMode(rawValue: layout.viewMode) { viewMode = mode }
+            if let size = GridSize(rawValue: layout.gridSize) { gridSize = size }
+            if let data = layout.columnCustomizationData,
+               let saved = try? JSONDecoder().decode(TableColumnCustomization<Video>.self, from: data)
+            {
+                columnCustomization = saved
+            }
+        }
+        // Sidebar expanded state always comes from layout
+        isLibraryExpanded = layout.sidebarExpanded["library"] ?? true
+        isCollectionsExpanded = layout.sidebarExpanded["collections"] ?? true
+        isRatingExpanded = layout.sidebarExpanded["rating"] ?? true
+        isTagsExpanded = layout.sidebarExpanded["tags"] ?? true
+    }
 
-    private func saveSidebarExpanded() {
+    /// Persist current live values (view mode, grid size, sidebar, columns) to the active mode's layout.
+    func updateCurrentLayoutFromLive() {
+        let base = effectiveLayout
         let state: [String: Bool] = [
             "library": isLibraryExpanded,
             "collections": isCollectionsExpanded,
             "rating": isRatingExpanded,
             "tags": isTagsExpanded,
         ]
-        UserDefaults.standard.set(state, forKey: Self.sidebarExpandedKey)
+        let colData = try? JSONEncoder().encode(columnCustomization)
+        let layout = LayoutParams(
+            sidebarWidth: base.sidebarWidth,
+            contentWidth: base.contentWidth,
+            detailWidth: base.detailWidth,
+            detailVideoHeight: base.detailVideoHeight,
+            sidebarExpanded: state,
+            columnCustomizationData: colData,
+            viewMode: viewMode.rawValue,
+            gridSize: gridSize.rawValue
+        )
+        if isPlayingInline {
+            playbackLayout = layout
+        } else {
+            browsingLayout = layout
+        }
+    }
+
+    /// Update layout with new size values from resize gestures. Call when user drags a divider.
+    func updateCurrentLayoutWithSizes(sidebarWidth: CGFloat? = nil, contentWidth: CGFloat? = nil, detailWidth: CGFloat? = nil, detailVideoHeight: CGFloat? = nil) {
+        let base = effectiveLayout
+        var updated = LayoutParams.from(playback: base)
+        if let w = sidebarWidth { updated.sidebarWidth = Double(w) }
+        if let w = contentWidth { updated.contentWidth = Double(w) }
+        if let w = detailWidth { updated.detailWidth = Double(w) }
+        if let h = detailVideoHeight { updated.detailVideoHeight = Double(h) }
+        if isPlayingInline {
+            playbackLayout = updated
+        } else {
+            browsingLayout = updated
+        }
     }
 
     func savePreferences() {
         let defaults = UserDefaults.standard
-        defaults.set(viewMode.rawValue, forKey: Self.viewModeKey)
-        defaults.set(gridSize.rawValue, forKey: Self.gridSizeKey)
         if let first = tableSortOrder.first {
             let sort = VideoSort.from(keyPath: first.keyPath)
             defaults.set(sort.rawValue, forKey: Self.sortColumnKey)
@@ -323,16 +450,6 @@ final class LibraryViewModel {
 
     private func loadPreferences() {
         let defaults = UserDefaults.standard
-        if let modeRaw = defaults.string(forKey: Self.viewModeKey),
-           let mode = ViewMode(rawValue: modeRaw)
-        {
-            viewMode = mode
-        }
-        if let sizeRaw = defaults.string(forKey: Self.gridSizeKey),
-           let size = GridSize(rawValue: sizeRaw)
-        {
-            gridSize = size
-        }
         if let sortRaw = defaults.string(forKey: Self.sortColumnKey),
            let sort = VideoSort(rawValue: sortRaw)
         {
@@ -379,20 +496,50 @@ final class LibraryViewModel {
             showThumbnailInDetail = defaults.bool(forKey: Self.showThumbnailInDetailKey)
         }
 
-        if let h = defaults.object(forKey: Self.detailHeightKey) as? Double, h > 0 {
-            detailHeight = CGFloat(h)
-        }
-        if let state = defaults.dictionary(forKey: Self.sidebarExpandedKey) as? [String: Bool] {
-            isLibraryExpanded = state["library"] ?? true
-            isCollectionsExpanded = state["collections"] ?? true
-            isRatingExpanded = state["rating"] ?? true
-            isTagsExpanded = state["tags"] ?? true
-        }
-        if let data = defaults.data(forKey: Self.columnCustomizationKey),
-           let saved = try? JSONDecoder().decode(TableColumnCustomization<Video>.self, from: data)
+        // Load layouts (with migration from legacy keys)
+        if let data = defaults.data(forKey: Self.browsingLayoutKey),
+           let layout = try? JSONDecoder().decode(LayoutParams.self, from: data)
         {
-            columnCustomization = saved
+            browsingLayout = layout
+        } else {
+            // Migrate from legacy keys
+            var migrated = LayoutParams.browsingDefaults()
+            if let h = defaults.object(forKey: "VideoMaster.detailHeight") as? Double, h > 0 {
+                migrated.detailVideoHeight = h
+            }
+            if let w = defaults.object(forKey: "VideoMaster.detailWidth") as? Double, w > 0 {
+                migrated.detailWidth = w
+            }
+            if let state = defaults.dictionary(forKey: "VideoMaster.sidebarExpanded") as? [String: Bool] {
+                migrated.sidebarExpanded = state
+            }
+            if let data = defaults.data(forKey: "VideoMaster.columnCustomization"),
+               let _ = try? JSONDecoder().decode(TableColumnCustomization<Video>.self, from: data)
+            {
+                migrated.columnCustomizationData = data
+            }
+            if let modeRaw = defaults.string(forKey: Self.viewModeKey),
+               let _ = ViewMode(rawValue: modeRaw) { migrated.viewMode = modeRaw }
+            if let sizeRaw = defaults.string(forKey: Self.gridSizeKey),
+               let _ = GridSize(rawValue: sizeRaw) { migrated.gridSize = sizeRaw }
+            browsingLayout = migrated
         }
+        if let data = defaults.data(forKey: Self.playbackLayoutKey),
+           let layout = try? JSONDecoder().decode(LayoutParams.self, from: data)
+        {
+            playbackLayout = layout
+        } else {
+            // Migrate playback from legacy when-playing keys
+            let h = defaults.object(forKey: "VideoMaster.detailHeightWhenPlaying") as? Double
+            let w = defaults.object(forKey: "VideoMaster.detailWidthWhenPlaying") as? Double
+            if h != nil || w != nil {
+                var p = LayoutParams.from(playback: browsingLayout)
+                if let h = h, h > 0 { p.detailVideoHeight = h }
+                if let w = w, w > 0 { p.detailWidth = w }
+                playbackLayout = p
+            }
+        }
+        applyLayout(browsingLayout)
     }
 
     func startObserving() {
@@ -840,6 +987,30 @@ final class LibraryViewModel {
         }
     }
 
+    /// Picks a random video from the current filtered list and selects it. Scroll is deferred until
+    /// `VideoDetailView` finishes loading/generating the filmstrip (`finishSurpriseScrollIfNeeded`).
+    func surpriseMePickRandom() {
+        guard let random = filteredVideos.randomElement() else { return }
+        selectedVideoIds = [random.id]
+        lastSelectedVideoId = random.id
+        pendingAutoPlay = surpriseMeAutoPlays
+        pendingSurpriseScrollVideoId = random.id
+    }
+
+    /// Schedules grid/list scroll after a short delay so playback and input are not blocked by LazyVGrid/layout work.
+    func finishSurpriseScrollIfNeeded(for videoId: String) {
+        guard pendingSurpriseScrollVideoId == videoId,
+              lastSelectedVideoId == videoId
+        else { return }
+        pendingSurpriseScrollVideoId = nil
+        let id = videoId
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard lastSelectedVideoId == id else { return }
+            scrollToVideoId = id
+        }
+    }
+
     func showFolderPicker() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -935,7 +1106,7 @@ final class LibraryViewModel {
         do {
             try FileManager.default.moveItem(at: oldURL, to: newURL)
             try await videoRepo.renameVideo(videoId: dbId, newFilePath: newFilePath, newFileName: trimmed)
-            await thumbnailService.migrateCacheKey(from: video.filePath, to: newFilePath)
+            thumbnailService.migrateCacheKey(from: video.filePath, to: newFilePath)
             if selectedVideoIds.contains(video.filePath) {
                 selectedVideoIds.remove(video.filePath)
                 selectedVideoIds.insert(newFilePath)
@@ -977,7 +1148,7 @@ final class LibraryViewModel {
     }
 
     func clearFilmstripCacheAndMarkApplied() async {
-        await thumbnailService.deleteAllFilmstrips()
+        thumbnailService.deleteAllFilmstrips()
         if let selectedId = lastSelectedVideoId ?? selectedVideoIds.first,
            let video = videos.first(where: { $0.filePath == selectedId })
         {

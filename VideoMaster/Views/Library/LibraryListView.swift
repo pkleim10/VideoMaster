@@ -14,7 +14,7 @@ struct TableScrollHelper: NSViewRepresentable {
         guard let row = scrollToRow, row >= 0 else { return }
         guard let window = nsView.window,
               let tableView = Self.findTableView(in: window.contentView!) else { return }
-        for delay in [0.05, 0.2, 0.5] {
+        for delay in [0.05, 0.2, 0.5, 0.9, 1.5] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 Self.centerRow(row, in: tableView)
             }
@@ -36,22 +36,26 @@ struct TableScrollHelper: NSViewRepresentable {
         scrollView.documentView?.scroll(NSPoint(x: 0, y: clampedY))
     }
 
+    /// Prefer the table with the most rows (video list) over sidebar/collections.
     private static func findTableView(in view: NSView) -> NSTableView? {
-        if let tv = view as? NSTableView {
-            return tv
-        }
-        for subview in view.subviews {
-            if let tv = findTableView(in: subview) {
-                return tv
+        var best: NSTableView?
+        var bestRows = 0
+        func search(_ v: NSView) {
+            if let tv = v as? NSTableView, tv.numberOfRows > bestRows {
+                best = tv
+                bestRows = tv.numberOfRows
             }
+            for sub in v.subviews { search(sub) }
         }
-        return nil
+        search(view)
+        return best
     }
 }
 
 struct LibraryListView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
+    @Binding var scrollPositionRow: Int?
 
     @State private var filmstripVideo: Video?
     @FocusState private var isRenameFocused: Bool
@@ -171,6 +175,8 @@ struct LibraryListView: View {
             if viewModel.scrollToSelectedOnViewSwitch {
                 viewModel.scrollToSelectedOnViewSwitch = false
                 scrollToSelectedRow(delay: 0.3)
+            } else if let row = scrollPositionRow, row >= 0, row < viewModel.filteredVideos.count {
+                scrollToRow(withId: viewModel.filteredVideos[row].id, delay: 0.2)
             }
         }
         .onChange(of: viewModel.scrollToVideoId, initial: true) { _, targetId in
@@ -289,7 +295,10 @@ struct LibraryListView: View {
     }
 
     private func scrollToSelectedRow(delay: Double) {
-        guard let selectedId = viewModel.selectedVideoIds.first else { return }
+        guard let selectedId = viewModel.selectedVideoIds.first,
+              let row = viewModel.filteredVideos.firstIndex(where: { $0.id == selectedId })
+        else { return }
+        scrollPositionRow = row
         scrollToRow(withId: selectedId, delay: delay)
     }
 

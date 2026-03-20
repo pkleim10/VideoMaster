@@ -25,13 +25,7 @@ struct VideoMasterApp: App {
         .commands {
             CommandGroup(after: .sidebar) {
                 Button("Surprise Me!") {
-                    guard let vm = appState.libraryViewModel,
-                          let random = vm.filteredVideos.randomElement()
-                    else { return }
-                    vm.selectedVideoIds = [random.id]
-                    vm.lastSelectedVideoId = random.id
-                    vm.scrollToVideoId = random.id
-                    vm.pendingAutoPlay = vm.surpriseMeAutoPlays
+                    appState.libraryViewModel?.surpriseMePickRandom()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(appState.libraryViewModel?.filteredVideos.isEmpty ?? true)

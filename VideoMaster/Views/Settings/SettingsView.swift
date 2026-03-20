@@ -148,7 +148,7 @@ struct VideoSettingsView: View {
             Section {
                 Toggle("Surprise Me! auto-plays selected video", isOn: $viewModel.surpriseMeAutoPlays)
             } footer: {
-                Text("When enabled, clicking Surprise Me! will immediately start playing the randomly selected video. When disabled, the video is selected and scrolled to but not played.")
+                Text("Surprise Me updates selection immediately, loads or generates the filmstrip for the detail pane, then starts auto-play if enabled, then scrolls the grid or list to the selection.")
             }
         }
         .formStyle(.grouped)

@@ -59,6 +59,7 @@ struct ScrollbarEnabler: NSViewRepresentable {
 struct LibraryGridView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
+    @Binding var scrollPositionId: String?
     @State private var lastClickedIndex: Int?
     @State private var filmstripVideo: Video?
     @FocusState private var isRenameFocused: Bool
@@ -100,16 +101,18 @@ struct LibraryGridView: View {
                             }
                         }
                         .padding(padding)
+                        .scrollTargetLayout()
                         .background(ScrollbarEnabler())
                     }
+                    .scrollPosition(id: $scrollPositionId, anchor: .center)
                     .onChange(of: viewModel.scrollToVideoId, initial: true) { _, targetId in
                         guard let id = targetId else { return }
                         viewModel.scrollToVideoId = nil
-                        // LazyVGrid may not have rendered target yet; retry with increasing delays
-                        for delay in [0.05, 0.15, 0.35] as [Double] {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                                proxy.scrollTo(id, anchor: .center)
-                            }
+                        guard viewModel.filteredVideos.contains(where: { $0.id == id }) else { return }
+                        // Defer so detail/playback stay responsive; `scrollTo` matches real layout (unlike AppKit estimates).
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(120))
+                            proxy.scrollTo(id, anchor: .center)
                         }
                     }
                 }
@@ -119,7 +122,7 @@ struct LibraryGridView: View {
         .onAppear {
             if viewModel.scrollToSelectedOnViewSwitch, let id = viewModel.selectedVideoIds.first {
                 viewModel.scrollToSelectedOnViewSwitch = false
-                viewModel.scrollToVideoId = id
+                scrollPositionId = id
             }
         }
         .onChange(of: viewModel.renamingVideoId) { _, _ in
@@ -398,7 +401,7 @@ struct VideoGridCell: View {
     }
 
     private func loadThumbnail() async {
-        if let cached = await thumbnailService.loadThumbnail(for: video.filePath) {
+        if let cached = thumbnailService.loadThumbnail(for: video.filePath) {
             thumbnail = cached
             return
         }

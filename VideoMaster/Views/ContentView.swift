@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
         if !appState.hasLibrary {
@@ -19,7 +18,9 @@ struct ContentView: View {
 private struct LibraryContentView: View {
     let vm: LibraryViewModel
     let thumbService: ThumbnailService
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// Persists across content host rootView replacements (playback/browsing switch, layout changes).
+    @State private var gridScrollPositionId: String?
+    @State private var listScrollPositionRow: Int?
 
     private var navigationTitle: String {
         let name = DatabaseExportImport.activeLibraryDisplayName
@@ -27,20 +28,64 @@ private struct LibraryContentView: View {
         return "VideoMaster — \(name)"
     }
 
-    var body: some View {
-        @Bindable var bindableVM = vm
+    private var sidebarID: String {
+        "\(vm.sidebarFilter.hashValue)-\(vm.isLibraryExpanded)-\(vm.isCollectionsExpanded)-\(vm.isRatingExpanded)-\(vm.isTagsExpanded)-\(vm.collections.count)-\(vm.tags.count)-\(vm.libraryCounts.all)-\(vm.showRecentlyAdded)-\(vm.showRecentlyPlayed)-\(vm.showTopRated)-\(vm.showDuplicates)-\(vm.showCorrupt)-\(vm.showMissing)"
+    }
 
+    private var detailID: String {
+        vm.lastSelectedVideoId ?? ""
+    }
+
+    /// Column targets for the split view always follow browsing layout so toggling playback
+    /// does not change effective widths (avoids a layout pulse / grid jump before freeze).
+    private var browsingSplitSidebarWidth: CGFloat { CGFloat(vm.browsingLayout.sidebarWidth) }
+    private var browsingSplitContentWidth: CGFloat { CGFloat(vm.browsingLayout.contentWidth) }
+    private var browsingSplitDetailWidth: CGFloat { CGFloat(vm.browsingLayout.detailWidth) }
+
+    var body: some View {
         VStack(spacing: 0) {
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView(viewModel: vm)
-            } content: {
-                Group {
-                    if vm.viewMode == .grid {
-                        LibraryGridView(viewModel: vm, thumbnailService: thumbService)
-                    } else {
-                        LibraryListView(viewModel: vm, thumbnailService: thumbService)
-                    }
-                }
+            ResizableSplitView(
+                sidebarWidth: browsingSplitSidebarWidth,
+                contentWidth: browsingSplitContentWidth,
+                detailWidth: browsingSplitDetailWidth,
+                sidebarID: sidebarID,
+                // Include filteredVideosVersion so toolbar/search state updates when the list loads or filters change.
+                // (NSHostingView rootView is only replaced when contentID changes; see ResizableSplitView.)
+                contentID: "\(vm.viewMode.rawValue)-\(vm.videos.isEmpty)-\(vm.filteredVideosVersion)",
+                detailID: detailID,
+                freezeContent: vm.isPlayingInline,
+                onSizesChanged: { s, c, d in
+                    vm.updateCurrentLayoutWithSizes(sidebarWidth: s, contentWidth: c, detailWidth: d)
+                },
+                sidebar: { SidebarView(viewModel: vm).frame(minWidth: 120) },
+                content: { libraryContent },
+                detail: { detailContent }
+            )
+            .navigationTitle(navigationTitle)
+
+            statusBar(vm: vm)
+        }
+        .task { vm.startObserving() }
+        .onAppear { installKeyMonitor(vm: vm) }
+    }
+
+    @ViewBuilder
+    private var libraryContent: some View {
+        Group {
+            if vm.viewMode == .grid {
+                LibraryGridView(
+                    viewModel: vm,
+                    thumbnailService: thumbService,
+                    scrollPositionId: $gridScrollPositionId
+                )
+            } else {
+                LibraryListView(
+                    viewModel: vm,
+                    thumbnailService: thumbService,
+                    scrollPositionRow: $listScrollPositionRow
+                )
+            }
+        }
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     guard !providers.isEmpty else { return true }
                     let group = DispatchGroup()
@@ -97,16 +142,12 @@ private struct LibraryContentView: View {
                         .frame(width: 80)
 
                         Button(action: {
-                            guard let random = vm.filteredVideos.randomElement() else { return }
-                            vm.selectedVideoIds = [random.id]
-                            vm.lastSelectedVideoId = random.id
-                            vm.scrollToVideoId = random.id
-                            vm.pendingAutoPlay = vm.surpriseMeAutoPlays
+                            vm.surpriseMePickRandom()
                         }) {
                             Label("Surprise Me!", systemImage: "exclamationmark.circle.fill")
                         }
                         .disabled(vm.filteredVideos.isEmpty)
-                        .help(vm.surpriseMeAutoPlays ? "Play a random video from the current list" : "Choose a random video from the current list")
+                        .help("Random video: filmstrip in detail first, then scroll list/grid to the selection")
 
                         SortMenuButton(viewModel: vm)
                     }
@@ -122,34 +163,34 @@ private struct LibraryContentView: View {
                         }
                     }
                 }
-                .searchable(text: $bindableVM.searchText, prompt: "Search videos")
+                .searchable(text: Binding(get: { vm.searchText }, set: { vm.searchText = $0 }), prompt: "Search videos")
                 .overlay {
                     if vm.videos.isEmpty && !vm.isScanning {
                         emptyStateView
                     }
                 }
-            } detail: {
-                if let selectedId = vm.lastSelectedVideoId ?? vm.selectedVideoIds.first,
-                   let video = vm.filteredVideos.first(where: { $0.id == selectedId })
-                {
-                    VideoDetailView(video: video, viewModel: vm, thumbnailService: thumbService)
-                } else {
-                    Text("Select a video")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .navigationSplitViewStyle(.balanced)
-            .navigationTitle(navigationTitle)
+                .frame(minWidth: 80)
+    }
 
-            statusBar(vm: vm)
+    @ViewBuilder
+    private var detailContent: some View {
+        Group {
+            if let selectedId = vm.lastSelectedVideoId ?? vm.selectedVideoIds.first,
+               let video = vm.filteredVideos.first(where: { $0.id == selectedId })
+            {
+                VideoDetailView(video: video, viewModel: vm, thumbnailService: thumbService)
+            } else {
+                Text("Select a video")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .task {
-            vm.startObserving()
-        }
-        .onAppear {
-            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        .frame(minWidth: 200)
+    }
+
+    private func installKeyMonitor(vm: LibraryViewModel) {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 let lvm = vm
                 // Enter key (without modifiers) — start inline rename in list or grid mode
                 if event.keyCode == 36, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [], !lvm.isEditingText {
@@ -210,7 +251,6 @@ private struct LibraryContentView: View {
                 }
                 return event
             }
-        }
     }
 
     private var emptyStateView: some View {

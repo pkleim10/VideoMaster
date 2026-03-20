@@ -18,9 +18,15 @@ private func withTimeout<T: Sendable>(seconds: Double, operation: @Sendable @esc
     }
 }
 
-actor ThumbnailService {
+/// Disk + memory cache for thumbnails/filmstrips. **Not** an `actor`: fast `load*` calls must not wait behind
+/// `generate*` work from hundreds of grid cells (that was causing multi‑second stalls in the detail pane).
+final class ThumbnailService: @unchecked Sendable {
     private let cacheDirectory: URL
     private let memoryCache = NSCache<NSString, NSImage>()
+    /// Serializes cache directory mutations (migrate, bulk delete, clear).
+    private let managementLock = NSLock()
+
+    private static let filmstripCachePrefix = "_filmstrip"
 
     init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -35,6 +41,43 @@ actor ThumbnailService {
         let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
         return cacheDirectory.appendingPathComponent("\(hashString).jpg")
     }
+
+    func filmstripURL(for filePath: String) -> URL {
+        let hash = SHA256.hash(data: Data(filePath.utf8))
+        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
+        return cacheDirectory.appendingPathComponent("\(hashString)_filmstrip.jpg")
+    }
+
+    // MARK: - Fast path (memory + disk; never waits on AV / generation)
+
+    /// Thread-safe: `NSCache` is thread-safe; disk read is local to this call.
+    func loadThumbnail(for filePath: String) -> NSImage? {
+        let key = filePath as NSString
+        if let cached = memoryCache.object(forKey: key) {
+            return cached
+        }
+        let url = thumbnailURL(for: filePath)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let image = NSImage(contentsOf: url)
+        else { return nil }
+        memoryCache.setObject(image, forKey: key)
+        return image
+    }
+
+    func loadFilmstrip(for filePath: String) -> NSImage? {
+        let memKey = (filePath + Self.filmstripCachePrefix) as NSString
+        if let cached = memoryCache.object(forKey: memKey) {
+            return cached
+        }
+        let url = filmstripURL(for: filePath)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let image = NSImage(contentsOf: url)
+        else { return nil }
+        memoryCache.setObject(image, forKey: memKey)
+        return image
+    }
+
+    // MARK: - Generation (async; can run concurrently for different files)
 
     func generateThumbnail(for video: Video) async throws -> URL {
         let cacheURL = thumbnailURL(for: video.filePath)
@@ -81,29 +124,6 @@ actor ThumbnailService {
         memoryCache.setObject(nsImage, forKey: video.filePath as NSString)
         return cacheURL
     }
-
-    func loadThumbnail(for filePath: String) -> NSImage? {
-        let key = filePath as NSString
-        if let cached = memoryCache.object(forKey: key) {
-            return cached
-        }
-        let url = thumbnailURL(for: filePath)
-        guard FileManager.default.fileExists(atPath: url.path),
-              let image = NSImage(contentsOf: url)
-        else { return nil }
-        memoryCache.setObject(image, forKey: key)
-        return image
-    }
-
-    // MARK: - Filmstrip
-
-    func filmstripURL(for filePath: String) -> URL {
-        let hash = SHA256.hash(data: Data(filePath.utf8))
-        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-        return cacheDirectory.appendingPathComponent("\(hashString)_filmstrip.jpg")
-    }
-
-    private static let filmstripCachePrefix = "_filmstrip"
 
     func generateFilmstrip(for video: Video, rows: Int = 2, columns: Int = 4) async throws -> NSImage {
         let cacheURL = filmstripURL(for: video.filePath)
@@ -209,6 +229,8 @@ actor ThumbnailService {
     }
 
     func deleteAllFilmstrips() {
+        managementLock.lock()
+        defer { managementLock.unlock() }
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil) else { return }
         for url in contents where url.lastPathComponent.hasSuffix("_filmstrip.jpg") {
@@ -217,22 +239,9 @@ actor ThumbnailService {
         memoryCache.removeAllObjects()
     }
 
-    func loadFilmstrip(for filePath: String) -> NSImage? {
-        let memKey = (filePath + Self.filmstripCachePrefix) as NSString
-        if let cached = memoryCache.object(forKey: memKey) {
-            return cached
-        }
-        let url = filmstripURL(for: filePath)
-        guard FileManager.default.fileExists(atPath: url.path),
-              let image = NSImage(contentsOf: url)
-        else { return nil }
-        memoryCache.setObject(image, forKey: memKey)
-        return image
-    }
-
-    // MARK: - Cache Management
-
     func migrateCacheKey(from oldFilePath: String, to newFilePath: String) {
+        managementLock.lock()
+        defer { managementLock.unlock() }
         let oldDiskURL = thumbnailURL(for: oldFilePath)
         let newDiskURL = thumbnailURL(for: newFilePath)
         if FileManager.default.fileExists(atPath: oldDiskURL.path) {
@@ -258,6 +267,8 @@ actor ThumbnailService {
     }
 
     func clearCache() throws {
+        managementLock.lock()
+        defer { managementLock.unlock() }
         memoryCache.removeAllObjects()
         let contents = try FileManager.default.contentsOfDirectory(
             at: cacheDirectory,

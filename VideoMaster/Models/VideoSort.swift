@@ -88,6 +88,19 @@ enum GridSize: String, CaseIterable {
         let itemWidth = (availableWidth - CGFloat(count - 1) * gridSpacing) / CGFloat(count)
         return Array(repeating: GridItem(.fixed(itemWidth), spacing: gridSpacing), count: count)
     }
+
+    /// Approximate cell height for one row in the library grid (used for fast NSScrollView jumps).
+    /// Tuned to match `VideoGridCell` (thumb + text + optional metadata + paddings); slight slack avoids underscrolling.
+    var estimatedScrollCellHeight: CGFloat {
+        switch self {
+        case .small:
+            return thumbnailHeight + 44 + 20
+        case .medium:
+            return thumbnailHeight + 72 + 36
+        case .large:
+            return thumbnailHeight + 96 + 40
+        }
+    }
 }
 
 enum SidebarFilter: Hashable {

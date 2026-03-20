@@ -16,16 +16,13 @@ struct VideoDetailView: View {
     @State private var isEditingName = false
     @State private var editedName: String = ""
     @State private var inlinePlayer: AVPlayer?
-    private var detailHeight: CGFloat {
-        get { viewModel.detailHeight }
-        nonmutating set { viewModel.detailHeight = newValue }
-    }
+    private var effectiveHeight: CGFloat { viewModel.effectiveDetailHeight }
 
     var body: some View {
         GeometryReader { geo in
             let totalHeight = geo.size.height
             let handleHeight: CGFloat = 8
-            let clampedDetailHeight = min(max(100, detailHeight), totalHeight - 100 - handleHeight)
+            let clampedDetailHeight = min(max(100, effectiveHeight), totalHeight - 100 - handleHeight)
             let thumbnailHeight = max(100, totalHeight - clampedDetailHeight - handleHeight)
 
             VStack(spacing: 0) {
@@ -73,19 +70,20 @@ struct VideoDetailView: View {
         .task(id: video.id) {
             stopInlinePlayback()
             viewModel.isPlayingInline = false
+            viewModel.pendingFilmstripSeekSeconds = nil
             isEditingName = false
             viewModel.isEditingText = false
             filmstrip = nil
             thumbnail = nil
             await loadData()
-            if viewModel.pendingAutoPlay {
-                viewModel.pendingAutoPlay = false
-                viewModel.isPlayingInline = true
-            }
+            // Extra yield so inline player / tap & Space handlers run before grid scroll is scheduled.
+            await Task.yield()
+            await Task.yield()
+            viewModel.finishSurpriseScrollIfNeeded(for: video.id)
         }
         .onChange(of: viewModel.filmstripRefreshId) { _, _ in
-            Task {
-                filmstrip = await thumbnailService.loadFilmstrip(for: video.filePath)
+            Task { @MainActor in
+                filmstrip = thumbnailService.loadFilmstrip(for: video.filePath)
                 if let fs = filmstrip {
                     inferFilmstripGrid(from: fs)
                 }
@@ -124,8 +122,9 @@ struct VideoDetailView: View {
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
-                        let newHeight = detailHeight - value.translation.height
-                        detailHeight = min(totalHeight - 108, max(100, newHeight))
+                        let base = viewModel.effectiveDetailHeight
+                        let newHeight = min(totalHeight - 108, max(100, base - value.translation.height))
+                        viewModel.updateCurrentLayoutWithSizes(detailVideoHeight: newHeight)
                     }
             )
             .overlay {
@@ -173,9 +172,12 @@ struct VideoDetailView: View {
         .onChange(of: viewModel.isPlayingInline) { _, isPlaying in
             if isPlaying {
                 if inlinePlayer == nil {
-                    startInlinePlayback()
+                    let seek = viewModel.pendingFilmstripSeekSeconds ?? 0
+                    viewModel.pendingFilmstripSeekSeconds = nil
+                    startInlinePlayback(at: seek)
                 }
             } else {
+                viewModel.pendingFilmstripSeekSeconds = nil
                 stopInlinePlayback()
             }
         }
@@ -212,17 +214,24 @@ struct VideoDetailView: View {
     }
 
     private func handleFilmstripClick(at location: CGPoint, in size: CGSize) {
-        guard let duration = video.duration, duration > 0 else { return }
-        let cellWidth = size.width / CGFloat(filmstripColumns)
-        let cellHeight = size.height / CGFloat(filmstripRows)
-        let col = min(Int(location.x / cellWidth), filmstripColumns - 1)
-        let row = min(Int(location.y / cellHeight), filmstripRows - 1)
-        let frameIndex = row * filmstripColumns + col
-        let totalFrames = filmstripRows * filmstripColumns
-        let seekTime = duration * Double(frameIndex + 1) / Double(totalFrames + 1)
+        let seekTime: Double
+        if let duration = video.duration, duration > 0, size.width > 0, size.height > 0,
+           filmstripColumns > 0, filmstripRows > 0
+        {
+            let cellWidth = size.width / CGFloat(filmstripColumns)
+            let cellHeight = size.height / CGFloat(filmstripRows)
+            let col = min(Int(location.x / cellWidth), filmstripColumns - 1)
+            let row = min(Int(location.y / cellHeight), filmstripRows - 1)
+            let frameIndex = row * filmstripColumns + col
+            let totalFrames = filmstripRows * filmstripColumns
+            seekTime = duration * Double(frameIndex + 1) / Double(totalFrames + 1)
+        } else {
+            // Duration often missing on first open until metadata loads; still start playback from the beginning.
+            seekTime = 0
+        }
 
         stopInlinePlayback()
-        startInlinePlayback(at: seekTime)
+        viewModel.pendingFilmstripSeekSeconds = seekTime
         viewModel.isPlayingInline = true
     }
 
@@ -502,24 +511,62 @@ struct VideoDetailView: View {
     }
 
     private func loadData() async {
-        filmstrip = await thumbnailService.loadFilmstrip(for: video.filePath)
-        thumbnail = await thumbnailService.loadThumbnail(for: video.filePath)
-        if thumbnail == nil {
-            if let url = try? await thumbnailService.generateThumbnail(for: video) {
-                thumbnail = NSImage(contentsOf: url)
-            }
-        }
-        if filmstrip == nil {
-            filmstrip = try? await thumbnailService.generateFilmstrip(
-                for: video,
-                rows: viewModel.defaultFilmstripRows,
-                columns: viewModel.defaultFilmstripColumns
-            )
-        }
+        // 1) Memory/disk — parallel I/O off main actor.
+        let path = video.filePath
+        let service = thumbnailService
+        async let filmstripLoaded: NSImage? = Task.detached(priority: .userInitiated) {
+            service.loadFilmstrip(for: path)
+        }.value
+        async let thumbnailLoaded: NSImage? = Task.detached(priority: .userInitiated) {
+            service.loadThumbnail(for: path)
+        }.value
+        filmstrip = await filmstripLoaded
+        thumbnail = await thumbnailLoaded
         if let fs = filmstrip {
             inferFilmstripGrid(from: fs)
         }
+
+        if viewModel.pendingSurpriseScrollVideoId == video.id, filmstrip != nil {
+            viewModel.showThumbnailInDetail = false
+        }
+
+        await Task.yield()
+
+        async let thumbnailGen: Void = generateThumbnailIfNeeded()
+        async let filmstripGen: Void = generateFilmstripIfNeeded()
+        _ = await (thumbnailGen, filmstripGen)
+
+        if viewModel.pendingSurpriseScrollVideoId == video.id, filmstrip != nil {
+            viewModel.showThumbnailInDetail = false
+        }
+
+        await Task.yield()
+
+        if viewModel.pendingAutoPlay {
+            viewModel.pendingAutoPlay = false
+            viewModel.isPlayingInline = true
+        }
+
         tags = viewModel.tagsForVideos(selectedIds)
+    }
+
+    private func generateThumbnailIfNeeded() async {
+        guard thumbnail == nil else { return }
+        if let url = try? await thumbnailService.generateThumbnail(for: video) {
+            thumbnail = NSImage(contentsOf: url)
+        }
+    }
+
+    private func generateFilmstripIfNeeded() async {
+        guard filmstrip == nil else { return }
+        if let generated = try? await thumbnailService.generateFilmstrip(
+            for: video,
+            rows: viewModel.defaultFilmstripRows,
+            columns: viewModel.defaultFilmstripColumns
+        ) {
+            filmstrip = generated
+            inferFilmstripGrid(from: generated)
+        }
     }
 
     private func inferFilmstripGrid(from image: NSImage) {

@@ -22,7 +22,7 @@ struct AsyncThumbnailView: View {
             }
         }
         .task(id: filePath) {
-            image = await thumbnailService.loadThumbnail(for: filePath)
+            image = thumbnailService.loadThumbnail(for: filePath)
         }
     }
 }
