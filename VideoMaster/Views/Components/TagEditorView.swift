@@ -45,13 +45,15 @@ struct TagToggleChip: View {
             HStack(spacing: 4) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
                     .font(.caption2)
-                    .foregroundStyle(isActive ? Color.accentColor : .secondary)
+                    .foregroundStyle(isActive ? Color.white : .secondary)
                 Text(tag.name)
                     .font(.caption)
+                    .fontWeight(isActive ? .semibold : .regular)
+                    .foregroundStyle(isActive ? Color.white : Color.primary)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(isActive ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
+            .background(isActive ? Color.accentColor : Color.secondary.opacity(0.08))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
