@@ -3,7 +3,6 @@ import AppKit
 
 struct ScrollbarEnabler: NSViewRepresentable {
     class Coordinator {
-        var timer: Timer?
         weak var scrollView: NSScrollView?
     }
 
@@ -14,25 +13,19 @@ struct ScrollbarEnabler: NSViewRepresentable {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             guard let sv = Self.findScrollView(from: view) else { return }
             context.coordinator.scrollView = sv
-            Self.configureScroller(sv)
-            context.coordinator.timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-                if let sv = context.coordinator.scrollView {
-                    Self.configureScroller(sv)
-                }
-            }
+            Self.applyScrollerPolicy(sv)
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         if let sv = context.coordinator.scrollView {
-            Self.configureScroller(sv)
+            Self.applyScrollerPolicy(sv)
         }
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.timer?.invalidate()
-        coordinator.timer = nil
+        coordinator.scrollView = nil
     }
 
     private static func findScrollView(from view: NSView) -> NSScrollView? {
@@ -44,7 +37,9 @@ struct ScrollbarEnabler: NSViewRepresentable {
         return nil
     }
 
-    private static func configureScroller(_ sv: NSScrollView) {
+    /// Sets scroller visibility only. **Do not** call `flashScrollers()` here — on large `LazyVGrid`
+    /// documents it forces layout and was making wheel/track scrolling multi‑second hitchy.
+    private static func applyScrollerPolicy(_ sv: NSScrollView) {
         sv.hasVerticalScroller = true
         sv.scrollerStyle = .overlay
         sv.verticalScroller?.alphaValue = 1.0
@@ -52,7 +47,6 @@ struct ScrollbarEnabler: NSViewRepresentable {
         if let clipView = sv.contentView as? NSClipView {
             clipView.postsBoundsChangedNotifications = true
         }
-        sv.flashScrollers()
     }
 }
 
@@ -60,7 +54,8 @@ struct LibraryGridView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
     @Binding var scrollPositionId: String?
-    @State private var lastClickedIndex: Int?
+    /// Anchor for shift‑range selection (id avoids `ForEach(Array(enumerated()))` on 10k+ libraries).
+    @State private var lastClickedVideoId: String?
     @State private var filmstripVideo: Video?
     @FocusState private var isRenameFocused: Bool
 
@@ -76,7 +71,7 @@ struct LibraryGridView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         LazyVGrid(columns: cols, spacing: viewModel.gridSize.gridSpacing) {
-                            ForEach(Array(viewModel.filteredVideos.enumerated()), id: \.element.id) { index, video in
+                            ForEach(viewModel.filteredVideos) { video in
                                 VideoGridCell(
                                     video: video,
                                     isSelected: viewModel.selectedVideoIds.contains(video.id),
@@ -93,7 +88,7 @@ struct LibraryGridView: View {
                                     playVideo(video)
                                 }
                                 .onTapGesture {
-                                    handleClick(video: video, index: index)
+                                    handleClick(video: video)
                                 }
                                 .contextMenu {
                                     videoContextMenu(video)
@@ -182,22 +177,27 @@ struct LibraryGridView: View {
         .padding(.vertical, 6)
     }
 
-    private func handleClick(video: Video, index: Int) {
+    private func handleClick(video: Video) {
         let flags = NSEvent.modifierFlags
+        let videos = viewModel.filteredVideos
         if flags.contains(.command) {
             if viewModel.selectedVideoIds.contains(video.id) {
                 viewModel.selectedVideoIds.remove(video.id)
             } else {
                 viewModel.selectedVideoIds.insert(video.id)
             }
-            lastClickedIndex = index
-        } else if flags.contains(.shift), let anchor = lastClickedIndex {
-            let range = min(anchor, index)...max(anchor, index)
-            let ids = range.map { viewModel.filteredVideos[$0].id }
+            lastClickedVideoId = video.id
+        } else if flags.contains(.shift),
+                  let anchorId = lastClickedVideoId,
+                  let anchorIdx = videos.firstIndex(where: { $0.id == anchorId }),
+                  let idx = videos.firstIndex(where: { $0.id == video.id })
+        {
+            let range = min(anchorIdx, idx)...max(anchorIdx, idx)
+            let ids = range.map { videos[$0].id }
             viewModel.selectedVideoIds = Set(ids)
         } else {
             viewModel.selectedVideoIds = [video.id]
-            lastClickedIndex = index
+            lastClickedVideoId = video.id
         }
     }
 
@@ -409,9 +409,11 @@ struct VideoGridCell: View {
             let url = try await thumbnailService.generateThumbnail(for: video)
             thumbnail = NSImage(contentsOf: url)
             if let dbId = video.databaseId {
-                try? await viewModel.videoRepo.updateThumbnailPath(
-                    videoId: dbId, path: url.path
-                )
+                let repo = viewModel.videoRepo
+                let path = url.path
+                Task {
+                    try? await repo.updateThumbnailPath(videoId: dbId, path: path)
+                }
             }
         } catch {
             // Thumbnail generation failed; placeholder stays

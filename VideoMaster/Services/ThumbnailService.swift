@@ -18,6 +18,34 @@ private func withTimeout<T: Sendable>(seconds: Double, operation: @Sendable @esc
     }
 }
 
+/// Caps concurrent `AVAssetImageGenerator` work so 10k+ libraries don’t spawn unbounded AV decode pressure.
+private actor ThumbnailGenerationGate {
+    private let maxConcurrent: Int
+    private var running = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(maxConcurrent: Int) {
+        self.maxConcurrent = max(1, maxConcurrent)
+    }
+
+    func acquire() async {
+        if running < maxConcurrent {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+        running += 1
+    }
+
+    func release() {
+        running -= 1
+        if !waiters.isEmpty {
+            let cont = waiters.removeFirst()
+            cont.resume()
+        }
+    }
+}
+
 /// Disk + memory cache for thumbnails/filmstrips. **Not** an `actor`: fast `load*` calls must not wait behind
 /// `generate*` work from hundreds of grid cells (that was causing multi‑second stalls in the detail pane).
 final class ThumbnailService: @unchecked Sendable {
@@ -25,6 +53,12 @@ final class ThumbnailService: @unchecked Sendable {
     private let memoryCache = NSCache<NSString, NSImage>()
     /// Serializes cache directory mutations (migrate, bulk delete, clear).
     private let managementLock = NSLock()
+    /// P0: bound concurrent AV thumbnail/filmstrip generation (grid + scanner + detail).
+    private let generationGate = ThumbnailGenerationGate(maxConcurrent: 4)
+    /// Coalesce multiple awaiters for the same path (grid scroll, scanner, detail).
+    private let inflightLock = NSLock()
+    private var inflightThumbnails: [String: Task<URL, Error>] = [:]
+    private var inflightFilmstrips: [String: Task<NSImage, Error>] = [:]
 
     private static let filmstripCachePrefix = "_filmstrip"
 
@@ -89,6 +123,46 @@ final class ThumbnailService: @unchecked Sendable {
             return cacheURL
         }
 
+        return try await coalescedThumbnailGeneration(for: video, filePath: video.filePath)
+    }
+
+    /// One in-flight generation per `filePath`; multiple awaiters share the same `Task`. AV work runs under a global concurrency cap.
+    private func coalescedThumbnailGeneration(for video: Video, filePath: String) async throws -> URL {
+        inflightLock.lock()
+        if let existing = inflightThumbnails[filePath] {
+            inflightLock.unlock()
+            return try await existing.value
+        }
+        let task = Task<URL, Error> {
+            await self.generationGate.acquire()
+            do {
+                let url = try await self.generateThumbnailWork(for: video)
+                await self.generationGate.release()
+                return url
+            } catch {
+                await self.generationGate.release()
+                throw error
+            }
+        }
+        inflightThumbnails[filePath] = task
+        inflightLock.unlock()
+        defer {
+            inflightLock.lock()
+            inflightThumbnails.removeValue(forKey: filePath)
+            inflightLock.unlock()
+        }
+        return try await task.value
+    }
+
+    private func generateThumbnailWork(for video: Video) async throws -> URL {
+        let cacheURL = thumbnailURL(for: video.filePath)
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            if let image = NSImage(contentsOf: cacheURL) {
+                memoryCache.setObject(image, forKey: video.filePath as NSString)
+            }
+            return cacheURL
+        }
+
         let url = video.url
         let nsImage: NSImage = try await withTimeout(seconds: 10) {
             let asset = AVURLAsset(url: url)
@@ -139,7 +213,7 @@ final class ThumbnailService: @unchecked Sendable {
             return image
         }
 
-        return try await buildFilmstrip(for: video, rows: rows, columns: columns)
+        return try await coalescedFilmstrip(for: video, rows: rows, columns: columns)
     }
 
     func regenerateFilmstrip(for video: Video, rows: Int, columns: Int) async throws -> NSImage {
@@ -147,7 +221,51 @@ final class ThumbnailService: @unchecked Sendable {
         let memKey = (video.filePath + Self.filmstripCachePrefix) as NSString
         try? FileManager.default.removeItem(at: cacheURL)
         memoryCache.removeObject(forKey: memKey)
-        return try await buildFilmstrip(for: video, rows: rows, columns: columns)
+        return try await runFilmstripBuildWithGate(for: video, rows: rows, columns: columns)
+    }
+
+    private func filmstripInflightKey(filePath: String, rows: Int, columns: Int) -> String {
+        "\(filePath)\u{1e}fs\u{1e}\(rows)x\(columns)"
+    }
+
+    private func coalescedFilmstrip(for video: Video, rows: Int, columns: Int) async throws -> NSImage {
+        let key = filmstripInflightKey(filePath: video.filePath, rows: rows, columns: columns)
+        inflightLock.lock()
+        if let existing = inflightFilmstrips[key] {
+            inflightLock.unlock()
+            return try await existing.value
+        }
+        let task = Task<NSImage, Error> {
+            await self.generationGate.acquire()
+            do {
+                let image = try await self.buildFilmstrip(for: video, rows: rows, columns: columns)
+                await self.generationGate.release()
+                return image
+            } catch {
+                await self.generationGate.release()
+                throw error
+            }
+        }
+        inflightFilmstrips[key] = task
+        inflightLock.unlock()
+        defer {
+            inflightLock.lock()
+            inflightFilmstrips.removeValue(forKey: key)
+            inflightLock.unlock()
+        }
+        return try await task.value
+    }
+
+    private func runFilmstripBuildWithGate(for video: Video, rows: Int, columns: Int) async throws -> NSImage {
+        await generationGate.acquire()
+        do {
+            let image = try await buildFilmstrip(for: video, rows: rows, columns: columns)
+            await generationGate.release()
+            return image
+        } catch {
+            await generationGate.release()
+            throw error
+        }
     }
 
     private func buildFilmstrip(for video: Video, rows: Int, columns: Int) async throws -> NSImage {

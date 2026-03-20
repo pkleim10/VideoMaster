@@ -55,7 +55,9 @@ File: `VideoMaster/Views/Library/LibraryGridView.swift` (outer `VStack`).
 
 ### 3.1 `ThumbnailService` (class, not actor)
 
-Loads use `NSCache` + disk reads that **do not** wait on generation. `generateThumbnail` / `buildFilmstrip` remain `async` and can run concurrently for different files.
+Loads use `NSCache` + disk reads that **do not** wait on generation.
+
+**P0:** `generateThumbnail` and filmstrip builds are **coalesced per path** (one in-flight `Task`, many awaiters) and limited to **4 concurrent** AV jobs via `ThumbnailGenerationGate`.
 
 File: `VideoMaster/Services/ThumbnailService.swift`.
 
@@ -69,14 +71,14 @@ File: `VideoMaster/Services/ThumbnailService.swift`.
 
 - On **appear** / **identity change**, each cell runs `loadThumbnail()`.
 - Path: memory miss → disk miss → **`generateThumbnail`** (heavy).
-- **No global concurrency limit** at the **task** layer: tasks **pile up**; the **actor** drains them **one at a time** → wall-clock delay grows with library size and scroll distance.
-- **Cancellation:** scrolling away cancels `.task`, but anything already running on the actor still **blocks** the queue.
+- **Concurrency:** grid `.task`s still **schedule** freely, but **AV generation** is **capped** and **deduped** per path inside `ThumbnailService`.
+- **Cancellation:** scrolling away cancels `.task`; shared in-flight work for a path may still **finish** if another consumer is waiting (by design).
 
 File: `VideoMaster/Views/Library/LibraryGridView.swift` (`VideoGridCell`).
 
 ### 3.3 List mode contrast
 
-`AsyncThumbnailView` uses the **same** service with `.task(id: filePath)` — same actor bottleneck **in principle**, but:
+`AsyncThumbnailView` uses the **same** service with `.task(id: filePath)` — generation still goes through the **same capped / coalesced** pipeline when something calls `generateThumbnail`, but:
 
 - Fewer visible thumbnails at once.
 - `Table` **reuses** row views more aggressively than a grid of large cells.
@@ -87,11 +89,10 @@ File: `VideoMaster/Views/Library/ThumbnailView.swift`.
 
 ## 4. Grid view construction costs
 
-### 4.1 `ForEach(Array(viewModel.filteredVideos.enumerated()), ...)`
+### 4.1 `ForEach(viewModel.filteredVideos)` (fixed)
 
-- Builds a **new** `Array` of `(offset, element)` pairs **whenever** the parent `body` runs.
-- Cost **Θ(n)** in **number of filtered videos**, even when `LazyVGrid` only **lays out** a subset.
-- **Mitigation:** `ForEach(viewModel.filteredVideos)` and derive range selection without storing index in `ForEach` (e.g. anchor id in `@State`, or `firstIndex` only on shift-click path).
+- **Was:** `ForEach(Array(enumerated()))` → **Θ(n)** allocation on **every** parent `body` run (selection changes, etc.) — catastrophic at 12k items.
+- **Now:** plain `ForEach` on `filteredVideos`; shift‑range uses `lastClickedVideoId` + `firstIndex` on click only.
 
 File: `LibraryGridView.swift`.
 
@@ -128,8 +129,8 @@ Files: `LibraryGridView.swift` (`ScrollViewReader`, `onChange(scrollToVideoId)`)
 
 ## 6. Auxiliary: `ScrollbarEnabler`
 
-- After 0.2s, finds `NSScrollView`, then starts **`Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true)`** calling `configureScroller` and **`flashScrollers()`**.
-- **Effect:** perpetual UI churn while the grid is open.
+- After 0.2s, finds `NSScrollView` and applies scroller policy **once** (no repeating timer).
+- **`flashScrollers()` removed:** it was firing every timer tick **and** on SwiftUI `updateNSView`, forcing full layout on huge lazy grids → multi‑second track clicks and hitchy scrolling.
 
 File: `LibraryGridView.swift` (`ScrollbarEnabler`).
 
@@ -166,7 +167,7 @@ File: `ResizableSplitView.swift`.
 ### P3 — Scroll / scroller hygiene
 
 1. If `scrollTo` is hot on huge libraries: try **coarse `NSScrollView` offset first**, then **one** delayed `scrollTo`, or gate `scrollTo` by library size.
-2. **Remove or drastically reduce** `ScrollbarEnabler` timer; configure scroller once or on bounds changes.
+2. ~~**Remove** `ScrollbarEnabler` timer~~ **Done** — no `flashScrollers` churn.
 
 ### P4 — Structural (larger projects)
 
