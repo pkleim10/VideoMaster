@@ -319,8 +319,8 @@ final class LibraryViewModel {
     }
 
     var effectiveDetailHeight: CGFloat { CGFloat(effectiveLayout.detailVideoHeight) }
-    var effectiveDetailWidth: CGFloat { CGFloat(effectiveLayout.detailWidth) }
-    var effectiveContentWidth: CGFloat { CGFloat(effectiveLayout.contentWidth) }
+    var effectiveDetailWidth: CGFloat { CGFloat(effectiveLayout.detailColumnWidth(for: viewMode)) }
+    var effectiveContentWidth: CGFloat { CGFloat(effectiveLayout.contentColumnWidth(for: viewMode)) }
     var effectiveSidebarWidth: CGFloat { CGFloat(effectiveLayout.sidebarWidth) }
 
     var columnCustomization = TableColumnCustomization<Video>() {
@@ -409,8 +409,10 @@ final class LibraryViewModel {
         let colData = try? JSONEncoder().encode(columnCustomization)
         let layout = LayoutParams(
             sidebarWidth: base.sidebarWidth,
-            contentWidth: base.contentWidth,
-            detailWidth: base.detailWidth,
+            contentWidthGrid: base.contentWidthGrid,
+            detailWidthGrid: base.detailWidthGrid,
+            contentWidthList: base.contentWidthList,
+            detailWidthList: base.detailWidthList,
             detailVideoHeight: base.detailVideoHeight,
             sidebarExpanded: state,
             columnCustomizationData: colData,
@@ -429,8 +431,18 @@ final class LibraryViewModel {
         let base = effectiveLayout
         var updated = LayoutParams.from(playback: base)
         if let w = sidebarWidth { updated.sidebarWidth = Double(w) }
-        if let w = contentWidth { updated.contentWidth = Double(w) }
-        if let w = detailWidth { updated.detailWidth = Double(w) }
+        if let w = contentWidth {
+            switch viewMode {
+            case .grid: updated.contentWidthGrid = Double(w)
+            case .list: updated.contentWidthList = Double(w)
+            }
+        }
+        if let w = detailWidth {
+            switch viewMode {
+            case .grid: updated.detailWidthGrid = Double(w)
+            case .list: updated.detailWidthList = Double(w)
+            }
+        }
         if let h = detailVideoHeight { updated.detailVideoHeight = Double(h) }
         if isPlayingInline {
             playbackLayout = updated
@@ -508,7 +520,8 @@ final class LibraryViewModel {
                 migrated.detailVideoHeight = h
             }
             if let w = defaults.object(forKey: "VideoMaster.detailWidth") as? Double, w > 0 {
-                migrated.detailWidth = w
+                migrated.detailWidthGrid = w
+                migrated.detailWidthList = w
             }
             if let state = defaults.dictionary(forKey: "VideoMaster.sidebarExpanded") as? [String: Bool] {
                 migrated.sidebarExpanded = state
@@ -535,7 +548,10 @@ final class LibraryViewModel {
             if h != nil || w != nil {
                 var p = LayoutParams.from(playback: browsingLayout)
                 if let h = h, h > 0 { p.detailVideoHeight = h }
-                if let w = w, w > 0 { p.detailWidth = w }
+                if let w = w, w > 0 {
+                    p.detailWidthGrid = w
+                    p.detailWidthList = w
+                }
                 playbackLayout = p
             }
         }

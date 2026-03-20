@@ -39,8 +39,12 @@ private struct LibraryContentView: View {
     /// Column targets for the split view always follow browsing layout so toggling playback
     /// does not change effective widths (avoids a layout pulse / grid jump before freeze).
     private var browsingSplitSidebarWidth: CGFloat { CGFloat(vm.browsingLayout.sidebarWidth) }
-    private var browsingSplitContentWidth: CGFloat { CGFloat(vm.browsingLayout.contentWidth) }
-    private var browsingSplitDetailWidth: CGFloat { CGFloat(vm.browsingLayout.detailWidth) }
+    private var browsingSplitContentWidth: CGFloat {
+        CGFloat(vm.browsingLayout.contentColumnWidth(for: vm.viewMode))
+    }
+    private var browsingSplitDetailWidth: CGFloat {
+        CGFloat(vm.browsingLayout.detailColumnWidth(for: vm.viewMode))
+    }
 
     var body: some View {
         VStack(spacing: 0) {

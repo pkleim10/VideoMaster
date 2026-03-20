@@ -22,8 +22,8 @@ This document is an **exhaustive** pass over what makes **library grid** mode ex
 
 ### 2.1 `LibraryViewModel` (`@Observable`)
 
-- **`filteredVideos` / `filteredVideosVersion`** — `applyFilteredVideos` bumps **version** when **structure** changes (count or `databaseId` order). Renames that keep order **do not** bump (good for scroll).
-- **Anything that calls `recomputeFilteredVideos()`** — sidebar filter, tags, search debounce, sort, many DB observers — eventually replaces `filteredVideos` and may bump version.
+- **`filteredVideos` / `filteredVideosVersion`** — `applyFilteredVideos` bumps **version** only when the **set** of `video.id` (file paths) in the filtered list **changes** (add/remove/rename path). **Pure sort/reorder** of the same rows does **not** bump. (Older docs incorrectly tied bumps to `databaseId` **order**.)
+- **Anything that calls `recomputeFilteredVideos()`** — sidebar filter, tags, search debounce, sort, many DB observers — eventually assigns `filteredVideos`; the **version** increments only when membership of ids changes, not when only order changes.
 
 Relevant: `LibraryViewModel.applyFilteredVideos`, `recomputeFilteredVideos`.
 
@@ -149,11 +149,12 @@ File: `ResizableSplitView.swift`.
 
 ### P0 — Thumbnail throughput (biggest win)
 
-1. **Stop serializing all work on one `actor`.** Typical pattern:
-   - **Memory + disk “read” path** on `MainActor` with `NSCache` + quick disk read (or a small dedicated queue for disk reads only).
-   - **Generation** on a **background** task with a **bounded** semaphore (e.g. 3–4 concurrent `AVAssetImageGenerator` jobs), then publish result on main actor.
-2. **Coalesce** `generateThumbnail` per `filePath` (single in-flight future shared by multiple awaiters).
-3. Ensure `.task` **cancellation** propagates into generation (check `Task.isCancelled` / `async let` groups).
+**Largely done in tree:** `ThumbnailService` is a **class** (fast `load*` vs `generate*`); **coalescing** per path; **`ThumbnailGenerationGate`** (4 concurrent AV jobs).
+
+**Still optional / next:**
+1. **Progressive thumbnails** (small/fast frame → sharp swap).
+2. Stronger **cancellation** inside long AV work (`Task.checkCancellation`).
+3. **Priority** / visibility hints so on-screen rows win the queue.
 
 ### P1 — Reduce full-grid teardown
 
@@ -197,4 +198,4 @@ File: `ResizableSplitView.swift`.
 
 ---
 
-*Last updated: performance deep-dive (grid vs list, Surprise Me, thumbnail actor, identity churn).*
+*Last updated: aligns with v0.6.x work — ScrollViewReader scroll, ScrollbarEnabler fix, `ForEach` without `enumerated()`, thumbnail gate + coalesce, `VideoGridCell` narrow inputs, `filteredVideosVersion` = membership-only, `contentID` + `.id` still duplicated (future reconcile).*
