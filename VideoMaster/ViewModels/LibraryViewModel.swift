@@ -367,7 +367,8 @@ final class LibraryViewModel {
             case .browsing: layout = self.browsingLayout
             case .playback: guard let p = self.playbackLayout else { return }; layout = p
             }
-            guard let data = try? JSONEncoder().encode(layout) else { return }
+            let safe = layout.sanitized()
+            guard let data = try? JSONEncoder().encode(safe) else { return }
             let key = mode == .browsing ? Self.browsingLayoutKey : Self.playbackLayoutKey
             UserDefaults.standard.set(data, forKey: key)
         }
@@ -419,10 +420,11 @@ final class LibraryViewModel {
             viewMode: viewMode.rawValue,
             gridSize: gridSize.rawValue
         )
+        let safe = layout.sanitized()
         if isPlayingInline {
-            playbackLayout = layout
+            playbackLayout = safe
         } else {
-            browsingLayout = layout
+            browsingLayout = safe
         }
     }
 
@@ -444,10 +446,11 @@ final class LibraryViewModel {
             }
         }
         if let h = detailVideoHeight { updated.detailVideoHeight = Double(h) }
+        let fixed = updated.sanitized()
         if isPlayingInline {
-            playbackLayout = updated
+            playbackLayout = fixed
         } else {
-            browsingLayout = updated
+            browsingLayout = fixed
         }
     }
 
@@ -512,7 +515,7 @@ final class LibraryViewModel {
         if let data = defaults.data(forKey: Self.browsingLayoutKey),
            let layout = try? JSONDecoder().decode(LayoutParams.self, from: data)
         {
-            browsingLayout = layout
+            browsingLayout = layout.sanitized()
         } else {
             // Migrate from legacy keys
             var migrated = LayoutParams.browsingDefaults()
@@ -535,12 +538,12 @@ final class LibraryViewModel {
                let _ = ViewMode(rawValue: modeRaw) { migrated.viewMode = modeRaw }
             if let sizeRaw = defaults.string(forKey: Self.gridSizeKey),
                let _ = GridSize(rawValue: sizeRaw) { migrated.gridSize = sizeRaw }
-            browsingLayout = migrated
+            browsingLayout = migrated.sanitized()
         }
         if let data = defaults.data(forKey: Self.playbackLayoutKey),
            let layout = try? JSONDecoder().decode(LayoutParams.self, from: data)
         {
-            playbackLayout = layout
+            playbackLayout = layout.sanitized()
         } else {
             // Migrate playback from legacy when-playing keys
             let h = defaults.object(forKey: "VideoMaster.detailHeightWhenPlaying") as? Double
@@ -552,7 +555,7 @@ final class LibraryViewModel {
                     p.detailWidthGrid = w
                     p.detailWidthList = w
                 }
-                playbackLayout = p
+                playbackLayout = p.sanitized()
             }
         }
         applyLayout(browsingLayout)

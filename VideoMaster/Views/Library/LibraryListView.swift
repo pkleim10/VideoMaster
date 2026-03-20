@@ -4,6 +4,23 @@ import AppKit
 struct TableScrollHelper: NSViewRepresentable {
     let scrollToRow: Int?
 
+    final class Coordinator: NSObject {
+        /// Bumped whenever a new scroll is scheduled so stale delayed work (e.g. after deletes / table rebuild)
+        /// cannot run — avoids EXC_BAD_ACCESS in SwiftUI’s AppKitOutlineTableCoordinator during scroll/layout races.
+        var generation: UInt64 = 0
+        var pending: [DispatchWorkItem] = []
+
+        func cancelPending() {
+            pending.forEach { $0.cancel() }
+            pending.removeAll()
+            generation &+= 1
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         view.setAccessibilityElement(false)
@@ -11,29 +28,48 @@ struct TableScrollHelper: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.cancelPending()
         guard let row = scrollToRow, row >= 0 else { return }
-        guard let window = nsView.window,
-              let tableView = Self.findTableView(in: window.contentView!) else { return }
-        for delay in [0.05, 0.2, 0.5, 0.9, 1.5] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                Self.centerRow(row, in: tableView)
+        guard let window = nsView.window, window.contentView != nil else { return }
+
+        let gen = context.coordinator.generation
+        let coord = context.coordinator
+
+        // Fewer, cancellable retries — the old 5× fire-and-forget pattern could still scroll after the
+        // filtered list shrank, fighting SwiftUI Table updates and crashing in objc_retain (see crash .ips).
+        let delays: [TimeInterval] = [0.06, 0.22, 0.45]
+        for delay in delays {
+            let work = DispatchWorkItem { [weak window, weak coord] in
+                guard let window, let coord else { return }
+                guard gen == coord.generation else { return }
+                guard let content = window.contentView,
+                      let tableView = Self.findTableView(in: content)
+                else { return }
+                Self.scrollRowSafely(row, in: tableView)
             }
+            coord.pending.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+
+        let focusWork = DispatchWorkItem { [weak window, weak coord] in
+            guard let window, let coord else { return }
+            guard gen == coord.generation else { return }
+            guard let content = window.contentView,
+                  let tableView = Self.findTableView(in: content),
+                  row < tableView.numberOfRows
+            else { return }
             window.makeFirstResponder(tableView)
         }
+        coord.pending.append(focusWork)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: focusWork)
     }
 
-    private static func centerRow(_ row: Int, in tableView: NSTableView) {
-        guard row >= 0, row < tableView.numberOfRows,
-              let scrollView = tableView.enclosingScrollView else { return }
+    /// Prefer `scrollRowToVisible` over manipulating `documentView` scroll — the latter triggered
+    /// scroll/layout while SwiftUI was rebuilding outline rows (crash report 2026-03-20).
+    private static func scrollRowSafely(_ row: Int, in tableView: NSTableView) {
+        guard row >= 0, row < tableView.numberOfRows else { return }
         tableView.layoutSubtreeIfNeeded()
-        let rowRect = tableView.rect(ofRow: row)
-        let visibleHeight = scrollView.documentVisibleRect.height
-        let targetY = rowRect.midY - visibleHeight / 2
-        let maxY = max(0, tableView.frame.height - visibleHeight)
-        let clampedY = max(0, min(targetY, maxY))
-        scrollView.documentView?.scroll(NSPoint(x: 0, y: clampedY))
+        tableView.scrollRowToVisible(row)
     }
 
     /// Prefer the table with the most rows (video list) over sidebar/collections.

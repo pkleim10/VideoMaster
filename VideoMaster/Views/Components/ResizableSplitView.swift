@@ -222,7 +222,9 @@ struct ResizableSplitView<Sidebar: View, Content: View, Detail: View>: NSViewRep
                 UserDefaults.standard.set(Double(contentW), forKey: "playbackDividerContent")
                 return
             }
-            if sidebarW > 80, contentW > 50, detailW > 100 {
+            let finite = sidebarW.isFinite && contentW.isFinite && detailW.isFinite
+            let reasonable = sidebarW < 8000 && contentW < 8000 && detailW < 8000
+            if finite, reasonable, sidebarW > 80, contentW > 50, detailW > 100 {
                 onSizesChanged?(sidebarW, contentW, detailW)
             }
         }

@@ -69,6 +69,23 @@ struct LayoutParams: Equatable {
             gridSize: playback.gridSize
         )
     }
+
+    /// Clamps persisted layout to sane ranges so a transient zero/negative geometry or split glitch
+    /// cannot corrupt UserDefaults (seen after crashes during heavy list updates).
+    func sanitized() -> LayoutParams {
+        func clamp(_ x: Double, _ lo: Double, _ hi: Double, _ fallback: Double) -> Double {
+            guard x.isFinite, x > 0 else { return fallback }
+            return min(hi, max(lo, x))
+        }
+        var copy = self
+        copy.sidebarWidth = clamp(sidebarWidth, 120, 900, Self.defaultSidebarWidth)
+        copy.contentWidthGrid = clamp(contentWidthGrid, 80, 6000, Self.defaultContentWidth)
+        copy.detailWidthGrid = clamp(detailWidthGrid, 100, 6000, Self.defaultDetailWidth)
+        copy.contentWidthList = clamp(contentWidthList, 80, 6000, Self.defaultContentWidth)
+        copy.detailWidthList = clamp(detailWidthList, 100, 6000, Self.defaultDetailWidth)
+        copy.detailVideoHeight = clamp(detailVideoHeight, 100, 2000, Self.defaultDetailVideoHeight)
+        return copy
+    }
 }
 
 extension LayoutParams: Codable {

@@ -123,7 +123,12 @@ struct VideoDetailView: View {
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
                         let base = viewModel.effectiveDetailHeight
-                        let newHeight = min(totalHeight - 108, max(100, base - value.translation.height))
+                        // Match clamp logic in body: avoid negative max when GeometryReader is transiently tiny
+                        // (e.g. list thrash / crash recovery), which previously corrupted persisted detail height.
+                        let minThumb: CGFloat = 100
+                        let handleH: CGFloat = 8
+                        let maxDetail = max(100, totalHeight - minThumb - handleH)
+                        let newHeight = min(maxDetail, max(100, base - value.translation.height))
                         viewModel.updateCurrentLayoutWithSizes(detailVideoHeight: newHeight)
                     }
             )
