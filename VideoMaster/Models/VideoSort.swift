@@ -28,7 +28,10 @@ enum VideoSort: String, CaseIterable, Identifiable {
         case .duration: return [KeyPathComparator(\Video.sortableDuration, order: order)]
         case .fileSize: return [KeyPathComparator(\Video.fileSize, order: order)]
         case .rating: return [KeyPathComparator(\Video.rating, order: order)]
-        case .resolution: return [KeyPathComparator(\Video.sortablePixelCount, order: order)]
+        case .resolution: return [
+            KeyPathComparator(\Video.sortableResolutionHeight, order: order),
+            KeyPathComparator(\Video.sortablePixelCount, order: order),
+        ]
         case .dateAdded: return [KeyPathComparator(\Video.dateAdded, order: order)]
         }
     }
@@ -38,6 +41,7 @@ enum VideoSort: String, CaseIterable, Identifiable {
         if keyPath == \Video.sortableDuration as PartialKeyPath<Video> { return .duration }
         if keyPath == \Video.fileSize as PartialKeyPath<Video> { return .fileSize }
         if keyPath == \Video.rating as PartialKeyPath<Video> { return .rating }
+        if keyPath == \Video.sortableResolutionHeight as PartialKeyPath<Video> { return .resolution }
         if keyPath == \Video.sortablePixelCount as PartialKeyPath<Video> { return .resolution }
         if keyPath == \Video.dateAdded as PartialKeyPath<Video> { return .dateAdded }
         return .dateAdded

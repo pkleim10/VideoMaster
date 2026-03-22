@@ -35,6 +35,12 @@ struct VideoMasterApp: App {
                 }
                 .keyboardShortcut("t", modifiers: [.command, .option])
                 .disabled(!appState.hasLibrary)
+
+                Button("Toggle Thumbnail / Filmstrip") {
+                    appState.libraryViewModel?.showThumbnailInDetail.toggle()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(!appState.hasLibrary)
             }
             CommandGroup(after: .pasteboard) {
                 Button("Delete\u{2026}") {

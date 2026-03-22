@@ -58,6 +58,8 @@ struct LibraryGridView: View {
     @State private var lastClickedVideoId: String?
     @State private var filmstripVideo: Video?
     @FocusState private var isRenameFocused: Bool
+    /// So ↑/↓ go through SwiftUI’s key pipeline (same as list `Table`) instead of AppKit’s scroll view only.
+    @FocusState private var gridArrowKeyFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -118,16 +120,37 @@ struct LibraryGridView: View {
             }
         }
         .id(viewModel.filteredVideosVersion)
+        .focusable()
+        .focused($gridArrowKeyFocused)
+        .onKeyPress(.upArrow) {
+            guard !viewModel.isEditingText else { return .ignored }
+            viewModel.navigateFilteredVideoStep(-1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            guard !viewModel.isEditingText else { return .ignored }
+            viewModel.navigateFilteredVideoStep(1)
+            return .handled
+        }
         .onAppear {
             if viewModel.scrollToSelectedOnViewSwitch, let id = viewModel.selectedVideoIds.first {
                 viewModel.scrollToSelectedOnViewSwitch = false
                 scrollPositionId = id
             }
+            // Become key target after layout so arrow keys aren’t only handled by NSScrollView.
+            DispatchQueue.main.async {
+                gridArrowKeyFocused = true
+            }
         }
-        .onChange(of: viewModel.renamingVideoId) { _, _ in
-            if viewModel.renamingVideoId != nil {
+        .onChange(of: viewModel.renamingVideoId) { _, id in
+            if id != nil {
+                gridArrowKeyFocused = false
                 DispatchQueue.main.async {
                     isRenameFocused = true
+                }
+            } else {
+                DispatchQueue.main.async {
+                    gridArrowKeyFocused = true
                 }
             }
         }
@@ -182,6 +205,7 @@ struct LibraryGridView: View {
     }
 
     private func handleClick(video: Video) {
+        gridArrowKeyFocused = true
         let flags = NSEvent.modifierFlags
         let videos = viewModel.filteredVideos
         if flags.contains(.command) {

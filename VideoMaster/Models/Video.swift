@@ -32,7 +32,10 @@ extension Video {
     var url: URL { URL(fileURLWithPath: filePath) }
 
     var sortableDuration: Double { duration ?? -1 }
+    /// Total pixels; used as a secondary key when sorting by resolution (height is primary).
     var sortablePixelCount: Int { (width ?? 0) * (height ?? 0) }
+    /// Vertical line count for resolution sort — matches how people describe “1080p”, etc.
+    var sortableResolutionHeight: Int { height ?? 0 }
 
     var resolution: String? {
         guard let w = width, let h = height else { return nil }

@@ -21,6 +21,8 @@ private struct LibraryContentView: View {
     /// Persists across content host rootView replacements (playback/browsing switch, layout changes).
     @State private var gridScrollPositionId: String?
     @State private var listScrollPositionRow: Int?
+    /// Must remove when the view goes away; repeated `onAppear` without removal stacks monitors and breaks handling.
+    @State private var keyDownMonitor: Any?
 
     private var navigationTitle: String {
         let name = DatabaseExportImport.activeLibraryDisplayName
@@ -70,7 +72,19 @@ private struct LibraryContentView: View {
             statusBar(vm: vm)
         }
         .task { vm.startObserving() }
-        .onAppear { installKeyMonitor(vm: vm) }
+        .onAppear {
+            guard keyDownMonitor == nil else { return }
+            let lvm = vm
+            keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                Self.processLibraryKeyDown(event, lvm: lvm)
+            }
+        }
+        .onDisappear {
+            if let m = keyDownMonitor {
+                NSEvent.removeMonitor(m)
+                keyDownMonitor = nil
+            }
+        }
     }
 
     @ViewBuilder
@@ -137,10 +151,10 @@ private struct LibraryContentView: View {
                                 }
                             }
                         )) {
-                            Label("Grid", systemImage: "square.grid.2x2")
-                                .tag(ViewMode.grid)
                             Label("List", systemImage: "list.bullet")
                                 .tag(ViewMode.list)
+                            Label("Grid", systemImage: "square.grid.2x2")
+                                .tag(ViewMode.grid)
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 80)
@@ -193,68 +207,68 @@ private struct LibraryContentView: View {
         .frame(minWidth: 200)
     }
 
-    private func installKeyMonitor(vm: LibraryViewModel) {
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                let lvm = vm
-                // Enter key (without modifiers) — start inline rename in list or grid mode
-                if event.keyCode == 36, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [], !lvm.isEditingText {
-                    if (lvm.viewMode == .list || lvm.viewMode == .grid),
-                       lvm.selectedVideoIds.count == 1,
-                       let videoId = lvm.selectedVideoIds.first,
-                       let video = lvm.filteredVideos.first(where: { $0.id == videoId })
-                    {
-                        Task { @MainActor in
-                            lvm.renameText = video.fileName
-                            lvm.renamingVideoId = videoId
-                        }
-                        return nil
-                    }
-                    return event
+    /// Returns `nil` to consume the key event (do not deliver to the app).
+    private static func processLibraryKeyDown(_ event: NSEvent, lvm: LibraryViewModel) -> NSEvent? {
+        // Enter key (without modifiers) — start inline rename in list or grid mode
+        if event.keyCode == 36, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [], !lvm.isEditingText {
+            if (lvm.viewMode == .list || lvm.viewMode == .grid),
+               lvm.selectedVideoIds.count == 1,
+               let videoId = lvm.selectedVideoIds.first,
+               let video = lvm.filteredVideos.first(where: { $0.id == videoId })
+            {
+                DispatchQueue.main.async {
+                    lvm.renameText = video.fileName
+                    lvm.renamingVideoId = videoId
                 }
-                // Escape key — cancel rename or stop playback
-                if event.keyCode == 53 {
-                    if lvm.renamingTagId != nil {
-                        Task { @MainActor in
-                            lvm.renamingTagId = nil
-                            lvm.tagRenameText = ""
-                            lvm.isEditingText = false
-                        }
-                        return nil
-                    }
-                    if lvm.renamingVideoId != nil {
-                        Task { @MainActor in
-                            lvm.renamingVideoId = nil
-                            lvm.renameText = ""
-                        }
-                        return nil
-                    }
-                    if lvm.isPlayingInline {
-                        Task { @MainActor in
-                            lvm.isPlayingInline = false
-                        }
-                        return nil
-                    }
-                    return event
+                return nil
+            }
+            return event
+        }
+        // Escape key — cancel rename or stop playback
+        if event.keyCode == 53 {
+            if lvm.renamingTagId != nil {
+                DispatchQueue.main.async {
+                    lvm.renamingTagId = nil
+                    lvm.tagRenameText = ""
+                    lvm.isEditingText = false
                 }
-                // Space key — play/pause (but not when typing in search or other text fields)
-                if event.keyCode == 49 {
-                    if let first = NSApp.keyWindow?.firstResponder,
-                       first is NSTextView || first is NSTextField
-                    {
-                        return event
-                    }
-                    guard !lvm.isEditingText, !lvm.selectedVideoIds.isEmpty else { return event }
-                    Task { @MainActor in
-                        if lvm.isPlayingInline {
-                            lvm.inlinePlayPauseToggle += 1
-                        } else {
-                            lvm.isPlayingInline = true
-                        }
-                    }
-                    return nil
+                return nil
+            }
+            if lvm.renamingVideoId != nil {
+                DispatchQueue.main.async {
+                    lvm.renamingVideoId = nil
+                    lvm.renameText = ""
                 }
+                return nil
+            }
+            if lvm.isPlayingInline {
+                DispatchQueue.main.async {
+                    lvm.isPlayingInline = false
+                }
+                return nil
+            }
+            return event
+        }
+        // Space key — play/pause (but not when typing in search or other text fields)
+        if event.keyCode == 49 {
+            if let first = NSApp.keyWindow?.firstResponder,
+               first is NSTextView || first is NSTextField
+            {
                 return event
             }
+            guard !lvm.isEditingText, !lvm.selectedVideoIds.isEmpty else { return event }
+            DispatchQueue.main.async {
+                if lvm.isPlayingInline {
+                    lvm.inlinePlayPauseToggle += 1
+                } else {
+                    lvm.isPlayingInline = true
+                }
+            }
+            return nil
+        }
+        // Grid ↑/↓ selection is handled by `LibraryGridView` (`.focusable` + `.onKeyPress`) so keys reach
+        // the same SwiftUI focus system as the scroll view; local monitors are unreliable here.
+        return event
     }
 
     private var emptyStateView: some View {

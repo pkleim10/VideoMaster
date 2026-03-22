@@ -51,7 +51,7 @@ Think of the window in **three columns** (you can drag the dividers to resize th
 | **Middle — Browsing pane** | **Grid** or **list** of videos. Search lives up here too. |
 | **Right — Detail** | **Preview** on top (thumbnail or **filmstrip**), **metadata and actions** below (name, path, tags, play buttons, and more). |
 
-The **toolbar** above the browsing pane has things you’ll use often: **Add Folder**, **Import New**, **Grid / List**, **Surprise Me!**, and sorting. The **status bar** at the very bottom shows counts and import progress.
+The **toolbar** above the browsing pane has things you’ll use often: **Add Folder**, **Import New**, **List / Grid**, **Surprise Me!**, and sorting. The **status bar** at the very bottom shows counts and import progress.
 
 ![Toolbar and browsing area (placeholder)](images/placeholder.svg)  
 *Later: `toolbar.png` or crop of main window.*
@@ -106,7 +106,7 @@ Under **LIBRARY** you’ll see entries like:
 - **Corrupt** — files that never got useful duration/resolution metadata (often damaged or wrong type).
 - **Missing** — files the library thinks should exist but aren’t on disk anymore.
 
-If **Missing** shows a “?” until you’ve scanned, use **Scan for missing files** in the toolbar when that filter is active.
+Choosing **Missing** starts a scan for files that are no longer on disk. You can run **Scan for missing files** again from the toolbar while that filter is active.
 
 Which rows appear here is controlled in **Settings → Library** under **Sidebar Filters**.
 
@@ -176,7 +176,7 @@ Open **VideoMaster → Settings…** (standard macOS Settings window). You need 
 | Tab | What you’ll find |
 |-----|-------------------|
 | **Library** | Exclude corrupt files from most filters, confirm before delete, which sidebar rows show (Recently Added, Duplicates, Missing, …) and their options. |
-| **Video** | Default **filmstrip** grid (rows × columns), regenerate filmstrips, **Surprise Me!** auto-play, **maximum large preview thumbnail (long-edge)** for the detail pane hi-res still. |
+| **Video** | Default **filmstrip** grid (rows × columns), regenerate filmstrips, **Surprise Me!** auto-play, **maximum large preview thumbnail (long-edge)**, **auto adjust video pane** toggle (splitter fits preview to media). |
 | **Data Sources** | List of watched folders, add/remove, **Show in Finder**. |
 | **File Ext** | Which extensions count as video when scanning; add custom extensions or reset to defaults. |
 
@@ -188,7 +188,7 @@ Open **VideoMaster → Settings…** (standard macOS Settings window). You need 
 ## If something goes wrong
 
 - **Empty library** — Add a **data source** folder and use **Import New**; check **Settings → File Ext** if your files use an unusual extension.
-- **Videos “missing”** — You moved or deleted files outside the app; use the **Missing** filter and **Scan for missing files**, then fix paths or remove stale entries.
+- **Videos “missing”** — You moved or deleted files outside the app; choose the **Missing** filter (it scans automatically), or use **Scan for missing files** in the toolbar to refresh, then fix paths or remove stale entries.
 - **Corrupt bucket** — Those files lack normal metadata; they might not be real videos or need re-encoding. They’re still visible under **Corrupt** even if hidden elsewhere.
 - **Weird window columns after a crash** — Recent builds **sanitize saved layout**; if it ever happens again, drag dividers back once — values are clamped on save now.
 - **List view crashed while deleting** — Update to the latest version; list scrolling was hardened against that crash.
@@ -205,6 +205,7 @@ When in doubt, **File** → **Open Library…** and pick your library file again
 |----------|--------|
 | **⇧⌘S** | Surprise Me! |
 | **⌥⌘T** | Clear tag filters |
+| **⌥⌘F** | Toggle **Thumbnail** / **Filmstrip** in the detail preview (same as the segmented control) |
 | **⌘Delete** | Delete selected video(s) (confirmation if enabled) |
 | **⇧⌘R** | Remove selected from library |
 | **⇧⌘O** | Add Folder… |
@@ -228,7 +229,7 @@ Under **File** (exact labels may vary slightly by OS language):
 - **Save Copy…** — backup library file.  
 - **Close Library…** / **Delete This Library…** — close or delete the **database** (not your video files).
 
-Other commands live under **VideoMaster** (About, Settings, etc.) and the **View** / **Window** menus as macOS provides.
+Other commands live under **VideoMaster** (About, Settings, etc.) and the **View** / **Window** menus as macOS provides. **View** includes **Surprise Me!**, **Clear Tag Filters**, and **Toggle Thumbnail / Filmstrip** (⌥⌘F).
 
 ---
 

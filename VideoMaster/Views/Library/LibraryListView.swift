@@ -169,7 +169,7 @@ struct LibraryListView: View {
             .width(min: 60, ideal: 80)
             .customizationID("duration")
 
-            TableColumn("Resolution", value: \.sortablePixelCount) { video in
+            TableColumn("Resolution", value: \.sortableResolutionHeight) { video in
                 if let label = video.resolutionLabel {
                     Text(label)
                         .foregroundStyle(.secondary)

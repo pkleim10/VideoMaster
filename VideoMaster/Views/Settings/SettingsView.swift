@@ -157,10 +157,11 @@ struct VideoSettingsView: View {
                         Text("\(w) px").tag(w)
                     }
                 }
+                Toggle("Auto adjust video pane", isOn: $viewModel.autoAdjustVideoPane)
             } header: {
                 Text("Detail Pane Preview")
             } footer: {
-                Text("Maximum width or height (long edge) for the disk-backed hi-res still when Thumbnail is selected. Larger values use more cache space. Grid and list thumbnails stay 400 px.")
+                Text("Maximum width or height (long edge) for the disk-backed hi-res still when Thumbnail is selected. Larger values use more cache space. Grid and list thumbnails stay 400 px. When Auto adjust video pane is on, the horizontal splitter between the preview and the metadata area is adjusted so the thumbnail or filmstrip fits the media.")
             }
         }
         .formStyle(.grouped)

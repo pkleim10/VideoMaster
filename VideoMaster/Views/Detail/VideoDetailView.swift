@@ -19,6 +19,8 @@ struct VideoDetailView: View {
     @State private var isEditingName = false
     @State private var editedName: String = ""
     @State private var inlinePlayer: AVPlayer?
+    /// Tracks detail column size for auto-adjust splitter (thumbnail/filmstrip vs metadata).
+    @State private var detailPaneSize: CGSize = .zero
     private var effectiveHeight: CGFloat { viewModel.effectiveDetailHeight }
 
     var body: some View {
@@ -38,6 +40,7 @@ struct VideoDetailView: View {
                         .labelsHidden()
                         .pickerStyle(.segmented)
                         .frame(width: 160)
+                        .help("Switch preview type (⌥⌘F)")
                         .padding(.top, 8)
                         .padding(.bottom, 4)
 
@@ -69,6 +72,18 @@ struct VideoDetailView: View {
                 }
                 .frame(height: clampedDetailHeight)
             }
+            .onAppear {
+                detailPaneSize = geo.size
+                scheduleAutoAdjustVideoPane()
+            }
+            .onChange(of: geo.size.width) { _, _ in
+                detailPaneSize = geo.size
+                scheduleAutoAdjustVideoPane(debounce: true)
+            }
+            .onChange(of: geo.size.height) { _, _ in
+                detailPaneSize = geo.size
+                scheduleAutoAdjustVideoPane(debounce: true)
+            }
         }
         .task(id: video.id) {
             stopInlinePlayback()
@@ -76,14 +91,24 @@ struct VideoDetailView: View {
             viewModel.pendingFilmstripSeekSeconds = nil
             isEditingName = false
             viewModel.isEditingText = false
-            filmstrip = nil
+            let path = video.filePath
             detailThumbnailLo = nil
             detailThumbnailHi = nil
+            // Filmstrip mode: load cached strip before any `await` so SwiftUI never paints a frame with
+            // `filmstrip == nil` while the strip exists on disk (that frame read as thumbnail/placeholder flash).
+            if viewModel.showThumbnailInDetail {
+                filmstrip = nil
+            } else {
+                let fs = thumbnailService.loadFilmstrip(for: path)
+                filmstrip = fs
+                if let f = fs {
+                    inferFilmstripGrid(from: f)
+                    if viewModel.autoAdjustVideoPane {
+                        applyAutoAdjustVideoPaneIfNeeded(filmstripSizingImage: f)
+                    }
+                }
+            }
             await loadData()
-            // Extra yield so inline player / tap & Space handlers run before grid scroll is scheduled.
-            await Task.yield()
-            await Task.yield()
-            viewModel.finishSurpriseScrollIfNeeded(for: video.id)
         }
         .onChange(of: viewModel.filmstripRefreshId) { _, _ in
             Task { @MainActor in
@@ -91,6 +116,7 @@ struct VideoDetailView: View {
                 if let fs = filmstrip {
                     inferFilmstripGrid(from: fs)
                 }
+                scheduleAutoAdjustVideoPane()
             }
         }
         .onChange(of: viewModel.detailPreviewMaxLongEdge) { _, _ in
@@ -98,6 +124,18 @@ struct VideoDetailView: View {
                 detailThumbnailHi = nil
                 scheduleDetailPreviewLoad(for: resolvedVideo)
             }
+        }
+        .onChange(of: viewModel.showThumbnailInDetail) { _, showThumb in
+            if showThumb {
+                scheduleDetailPreviewLoad(for: resolvedVideo)
+            }
+            scheduleAutoAdjustVideoPane()
+        }
+        .onChange(of: viewModel.isPlayingInline) { _, _ in
+            scheduleAutoAdjustVideoPane()
+        }
+        .onChange(of: viewModel.autoAdjustVideoPane) { _, _ in
+            scheduleAutoAdjustVideoPane()
         }
     }
 
@@ -168,6 +206,8 @@ struct VideoDetailView: View {
                 } else if let filmstrip {
                     filmstripImage(filmstrip)
                 } else if let detailStill {
+                    // Filmstrip mode, no strip yet: show grid/hi-res still while generating on demand (cached strips are
+                    // applied synchronously in `.task`, so this does not flash before an existing filmstrip).
                     Image(nsImage: detailStill)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -527,45 +567,70 @@ struct VideoDetailView: View {
     }
 
     private func loadData() async {
-        // 1) Memory/disk — parallel I/O off main actor.
         let path = video.filePath
         let service = thumbnailService
-        async let filmstripLoaded: NSImage? = Task.detached(priority: .userInitiated) {
-            service.loadFilmstrip(for: path)
-        }.value
-        async let thumbnailLoaded: NSImage? = Task.detached(priority: .userInitiated) {
-            service.loadThumbnail(for: path)
-        }.value
-        filmstrip = await filmstripLoaded
-        detailThumbnailLo = await thumbnailLoaded
-        if let fs = filmstrip {
-            inferFilmstripGrid(from: fs)
+        let stableId = video.id
+
+        // Metadata / detail pane first — do not wait for filmstrip load or generation.
+        tags = viewModel.tagsForVideos(selectedIds)
+        if viewModel.showThumbnailInDetail {
+            scheduleDetailPreviewLoad(for: resolvedVideo)
         }
-
-        if viewModel.pendingSurpriseScrollVideoId == video.id, filmstrip != nil {
-            viewModel.showThumbnailInDetail = false
-        }
-
-        await Task.yield()
-
-        async let thumbnailGen: Void = generateThumbnailIfNeeded()
-        async let filmstripGen: Void = generateFilmstripIfNeeded()
-        _ = await (thumbnailGen, filmstripGen)
-
-        if viewModel.pendingSurpriseScrollVideoId == video.id, filmstrip != nil {
-            viewModel.showThumbnailInDetail = false
-        }
-
-        await Task.yield()
+        // Do not schedule auto-adjust here: preview/filmstrip are not loaded yet; early runs used the
+        // 16:9 placeholder and caused flicker and wrong shrink-wrap when filmstrip appeared later.
 
         if viewModel.pendingAutoPlay {
             viewModel.pendingAutoPlay = false
             viewModel.isPlayingInline = true
         }
 
-        tags = viewModel.tagsForVideos(selectedIds)
+        await Task.yield()
 
-        scheduleDetailPreviewLoad(for: resolvedVideo)
+        // Cached filmstrip is applied synchronously in `.task(id:)` before this runs when Filmstrip is selected.
+
+        // Disk cache: 400px thumbnail loads off-thread; filmstrip generation continues in the background Task below.
+        let thumbnailLoaded = await Task.detached(priority: .userInitiated) {
+            service.loadThumbnail(for: path)
+        }.value
+        detailThumbnailLo = thumbnailLoaded
+        if viewModel.showThumbnailInDetail {
+            scheduleAutoAdjustVideoPane(debounce: true)
+        }
+
+        await Task.yield()
+
+        Task { @MainActor in
+            if filmstrip == nil {
+                let filmstripLoaded = await Task.detached(priority: .userInitiated) {
+                    service.loadFilmstrip(for: path)
+                }.value
+                if let fs = filmstripLoaded {
+                    inferFilmstripGrid(from: fs)
+                }
+                // Resize splitter using the loaded image *before* assigning @State so the first paint matches filmstrip aspect (no jump).
+                if !viewModel.showThumbnailInDetail, viewModel.autoAdjustVideoPane, let img = filmstripLoaded {
+                    applyAutoAdjustVideoPaneIfNeeded(filmstripSizingImage: img)
+                }
+                filmstrip = filmstripLoaded
+            }
+            if viewModel.pendingSurpriseScrollVideoId == stableId, filmstrip != nil {
+                viewModel.showThumbnailInDetail = false
+            }
+            await generateFilmstripIfNeeded()
+            if viewModel.pendingSurpriseScrollVideoId == stableId, filmstrip != nil {
+                viewModel.showThumbnailInDetail = false
+            }
+            // After on-demand generation, filmstrip @State is set — sync adjust (no debounced Task) to match strip immediately.
+            if !viewModel.showThumbnailInDetail, viewModel.autoAdjustVideoPane {
+                applyAutoAdjustVideoPaneIfNeeded()
+            }
+            await Task.yield()
+            await Task.yield()
+            viewModel.finishSurpriseScrollIfNeeded(for: stableId)
+        }
+        Task { @MainActor in
+            await generateThumbnailIfNeeded()
+        }
     }
 
     /// Disk-backed hi-res still (long edge from settings); 400px shows first, then swaps when JPEG is ready.
@@ -579,6 +644,7 @@ struct VideoDetailView: View {
                 let stillSelected = primary == stableId || viewModel.selectedVideoIds.contains(stableId)
                 guard stillSelected else { return }
                 detailThumbnailHi = large
+                scheduleAutoAdjustVideoPane()
             }
         }
     }
@@ -610,6 +676,90 @@ struct VideoDetailView: View {
         let rows = max(1, Int(round(image.size.height / cellHeight)))
         filmstripColumns = cols
         filmstripRows = rows
+    }
+
+    // MARK: - Auto-adjust preview / metadata split
+
+    private func scheduleAutoAdjustVideoPane(debounce: Bool = false) {
+        guard viewModel.autoAdjustVideoPane else { return }
+        if debounce {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(160))
+                applyAutoAdjustVideoPaneIfNeeded()
+            }
+        } else {
+            applyAutoAdjustVideoPaneIfNeeded()
+        }
+    }
+
+    /// - Parameter filmstripSizingImage: When set, used for height math **before** `filmstrip` @State is assigned so the splitter can update in the same frame as the filmstrip first appears (avoids jump/flicker).
+    private func applyAutoAdjustVideoPaneIfNeeded(filmstripSizingImage: NSImage? = nil) {
+        guard viewModel.autoAdjustVideoPane else { return }
+        let totalHeight = detailPaneSize.height
+        let fullWidth = detailPaneSize.width
+        guard totalHeight > 200, fullWidth > 80 else { return }
+
+        let horizontalPadding: CGFloat = 32
+        let contentW = max(40, fullWidth - horizontalPadding)
+        let handleH: CGFloat = 8
+        let minDetail: CGFloat = 100
+        let minThumb: CGFloat = 100
+
+        let filmstripEffective = filmstripSizingImage ?? filmstrip
+        let hasMediaChrome = !viewModel.isPlayingInline
+            && (detailThumbnailLo != nil || detailThumbnailHi != nil || filmstripEffective != nil)
+        let showHint = !viewModel.showThumbnailInDetail && filmstripEffective != nil
+        let chrome = previewColumnChromeHeight(
+            isPlayingInline: viewModel.isPlayingInline,
+            hasMediaChrome: hasMediaChrome,
+            showFilmstripHint: showHint
+        )
+        let fitted = fittedMediaHeight(contentWidth: contentW, filmstripOverride: filmstripSizingImage)
+        let idealThumbTotal = chrome + fitted
+
+        let maxThumb = totalHeight - minDetail - handleH
+        let thumbUsed = min(maxThumb, max(minThumb, idealThumbTotal))
+        let newDetailRaw = totalHeight - thumbUsed - handleH
+        let maxDetailAllowed = max(100, totalHeight - minThumb - handleH)
+        let newDetail = min(maxDetailAllowed, max(minDetail, newDetailRaw))
+        viewModel.updateCurrentLayoutWithSizes(detailVideoHeight: newDetail)
+    }
+
+    private func previewColumnChromeHeight(
+        isPlayingInline: Bool,
+        hasMediaChrome: Bool,
+        showFilmstripHint: Bool
+    ) -> CGFloat {
+        if isPlayingInline { return 4 }
+        var h: CGFloat = 4
+        if hasMediaChrome {
+            h += 8 + 30 + 4
+            if showFilmstripHint { h += 4 + 18 }
+        }
+        return h
+    }
+
+    private func fittedMediaHeight(contentWidth: CGFloat, filmstripOverride: NSImage? = nil) -> CGFloat {
+        let w = max(1, contentWidth)
+        if viewModel.isPlayingInline {
+            return w * 9 / 16
+        }
+        let img: NSImage?
+        if viewModel.showThumbnailInDetail {
+            img = detailThumbnailHi ?? detailThumbnailLo
+        } else {
+            // Prefer filmstrip dimensions when present (cached strips are set in `.task` before thumbnails load).
+            // When the strip is still generating, size to the visible interim still so auto-adjust matches the preview.
+            if let fs = filmstripOverride ?? filmstrip {
+                img = fs
+            } else {
+                img = detailThumbnailHi ?? detailThumbnailLo
+            }
+        }
+        guard let img, img.size.width > 0, img.size.height > 0 else {
+            return w * 9 / 16
+        }
+        return w * (img.size.height / img.size.width)
     }
 
     private var selectedIds: Set<String> {

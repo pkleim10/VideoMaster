@@ -64,7 +64,12 @@ final class LibraryViewModel {
         }
     }
     var sidebarFilter: SidebarFilter? = .all {
-        didSet { recomputeFilteredVideos() }
+        didSet {
+            recomputeFilteredVideos()
+            if case .missing = sidebarFilter, !isRefreshingMissing {
+                Task { await refreshMissingCount() }
+            }
+        }
     }
     var selectedTagIds: Set<Int64> = [] {
         didSet { recomputeFilteredVideos() }
@@ -164,6 +169,9 @@ final class LibraryViewModel {
     private static let confirmDeletionsKey = "VideoMaster.confirmDeletions"
     private static let showThumbnailInDetailKey = "VideoMaster.showThumbnailInDetail"
     private static let detailPreviewMaxLongEdgeKey = "VideoMaster.detailPreviewMaxLongEdge"
+    private static let autoAdjustVideoPaneKey = "VideoMaster.autoAdjustVideoPane"
+    /// Legacy Int padding stepper; migrated once to boolean toggle.
+    private static let legacyAutoAdjustVideoPanePaddingKey = "VideoMaster.autoAdjustVideoPanePadding"
     private static let browsingLayoutKey = "VideoMaster.browsingLayout"
     private static let playbackLayoutKey = "VideoMaster.playbackLayout"
     private static let filmstripRowsKey = "VideoMaster.filmstripRows"
@@ -313,6 +321,13 @@ final class LibraryViewModel {
     var detailPreviewMaxLongEdge: Int = 1080 {
         didSet {
             UserDefaults.standard.set(detailPreviewMaxLongEdge, forKey: Self.detailPreviewMaxLongEdgeKey)
+        }
+    }
+
+    /// When true, the horizontal splitter between preview and metadata is adjusted so the thumbnail or filmstrip fits (no extra spacing).
+    var autoAdjustVideoPane: Bool = false {
+        didSet {
+            UserDefaults.standard.set(autoAdjustVideoPane, forKey: Self.autoAdjustVideoPaneKey)
         }
     }
 
@@ -532,6 +547,13 @@ final class LibraryViewModel {
            ThumbnailService.detailPreviewLongEdgeChoices.contains(edge)
         {
             detailPreviewMaxLongEdge = edge
+        }
+        if defaults.object(forKey: Self.autoAdjustVideoPaneKey) != nil {
+            autoAdjustVideoPane = defaults.bool(forKey: Self.autoAdjustVideoPaneKey)
+        } else if let pad = defaults.object(forKey: Self.legacyAutoAdjustVideoPanePaddingKey) as? Int {
+            autoAdjustVideoPane = pad > 0
+            defaults.removeObject(forKey: Self.legacyAutoAdjustVideoPanePaddingKey)
+            defaults.set(autoAdjustVideoPane, forKey: Self.autoAdjustVideoPaneKey)
         }
 
         // Load layouts (with migration from legacy keys)
@@ -1062,6 +1084,27 @@ final class LibraryViewModel {
         }
     }
 
+    /// Grid keyboard navigation: move selection along `filteredVideos` (same order as list). List relies on `Table` arrow handling.
+    func navigateFilteredVideoStep(_ step: Int) {
+        guard step != 0 else { return }
+        let videos = filteredVideos
+        guard !videos.isEmpty else { return }
+        let currentId = lastSelectedVideoId ?? selectedVideoIds.first
+        let currentIndex: Int
+        if let id = currentId, let idx = videos.firstIndex(where: { $0.id == id }) {
+            currentIndex = idx
+        } else if step > 0 {
+            currentIndex = -1
+        } else {
+            currentIndex = videos.count
+        }
+        let next = currentIndex + step
+        guard next >= 0, next < videos.count else { return }
+        let newId = videos[next].id
+        selectedVideoIds = [newId]
+        scrollToVideoId = newId
+    }
+
     func showFolderPicker() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -1234,6 +1277,7 @@ final class LibraryViewModel {
     }
 
     func deleteVideos(_ ids: Set<String>) async {
+        let orderedIds = filteredVideos.map(\.id)
         for filePath in ids {
             if let video = videos.first(where: { $0.filePath == filePath }) {
                 try? await videoRepo.delete(video)
@@ -1242,11 +1286,13 @@ final class LibraryViewModel {
             }
         }
         selectedVideoIds.subtract(ids)
+        applySelectionAfterDeletionIfNeeded(orderedIdsBeforeDeletion: orderedIds, removedIds: ids)
         updateMissingAfterRemove(ids)
     }
 
     func removeVideosFromLibrary(_ ids: Set<String>) async {
         guard !ids.isEmpty else { return }
+        let orderedIds = filteredVideos.map(\.id)
         stopObserving()
         for filePath in ids {
             if let video = videos.first(where: { $0.filePath == filePath }) {
@@ -1254,8 +1300,30 @@ final class LibraryViewModel {
             }
         }
         selectedVideoIds.subtract(ids)
+        applySelectionAfterDeletionIfNeeded(orderedIdsBeforeDeletion: orderedIds, removedIds: ids)
         updateMissingAfterRemove(ids)
         await refreshAfterScan()
+    }
+
+    /// When deletion clears the selection, select the next row in the pre-deletion list order (or the previous if the last row was removed). List and grid both use `filteredVideos` order.
+    private func applySelectionAfterDeletionIfNeeded(orderedIdsBeforeDeletion ordered: [String], removedIds: Set<String>) {
+        guard selectedVideoIds.isEmpty, !removedIds.isEmpty else { return }
+        guard let next = Self.successorIdAfterRemoving(fromOrderedIds: ordered, removedIds: removedIds) else { return }
+        selectedVideoIds = [next]
+        lastSelectedVideoId = next
+        scrollToVideoId = next
+    }
+
+    private static func successorIdAfterRemoving(fromOrderedIds ordered: [String], removedIds: Set<String>) -> String? {
+        guard !ordered.isEmpty, !removedIds.isEmpty else { return nil }
+        guard let firstRemovedIdx = ordered.firstIndex(where: { removedIds.contains($0) }) else { return nil }
+        if let after = ordered[(firstRemovedIdx + 1)...].first(where: { !removedIds.contains($0) }) {
+            return after
+        }
+        if let before = ordered[..<firstRemovedIdx].last(where: { !removedIds.contains($0) }) {
+            return before
+        }
+        return nil
     }
 
     func recordPlay(for video: Video) async {
