@@ -37,7 +37,7 @@ When you don’t have a library open yet, you’ll see a simple screen with a fe
 
 You can do the same things from the menu bar: **File** → **New Library…**, **Open Library…**, **Open Recent**, etc.
 
-> **Tip:** Until a library is open, **Settings** will say you need a library first — that’s normal.
+> **Tip:** **Settings → Application** (appearance) is always available. Other tabs need an **open library**.
 
 ---
 
@@ -171,14 +171,15 @@ You can **drop folders or files** onto the browsing pane to import — useful wh
 
 ### Settings
 
-Open **VideoMaster → Settings…** (standard macOS Settings window). You need an **open library** first.
+Open **VideoMaster → Settings…** (standard macOS Settings window).
 
 | Tab | What you’ll find |
 |-----|-------------------|
-| **Library** | Exclude corrupt files from most filters, confirm before delete, which sidebar rows show (Recently Added, Duplicates, Missing, …) and their options. |
-| **Video** | Default **filmstrip** grid (rows × columns), regenerate filmstrips, **Surprise Me!** auto-play, **maximum large preview thumbnail (long-edge)**, **auto adjust video pane** toggle (splitter fits preview to media). |
-| **Data Sources** | List of watched folders, add/remove, **Show in Finder**. |
-| **File Ext** | Which extensions count as video when scanning; add custom extensions or reset to defaults. |
+| **Application** | **Appearance:** **System** (follow macOS light/dark), **Light**, or **Dark** (locks the app to that style). |
+| **Library** | Exclude corrupt files from most filters, confirm before delete, which sidebar rows show (Recently Added, Duplicates, Missing, …) and their options. *(Requires an open library.)* |
+| **Video** | Default **filmstrip** grid (rows × columns), regenerate filmstrips, **Surprise Me!** auto-play, **maximum large preview thumbnail (long-edge)**, **auto adjust video pane** toggle (splitter fits preview to media). *(Requires an open library.)* |
+| **Data Sources** | List of watched folders, add/remove, **Show in Finder**. *(Requires an open library.)* |
+| **File Ext** | Which extensions count as video when scanning; add custom extensions or reset to defaults. *(Requires an open library.)* |
 
 ![Settings Library tab (placeholder)](images/placeholder.svg)  
 *Later: `settings-library.png`.*

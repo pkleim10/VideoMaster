@@ -20,13 +20,11 @@
 
 1. **Video notes** — Add an optional notes field per video for personal annotations.
 
-2. **Appearance mode** — New setting: Light / Dark / System (override app appearance independent of macOS).
-
-3. **Filter section visibility** — Allow Library, Collections, Rating, and Tags filter sections to be individually shown or hidden quickly. **Control via context menus** (e.g. on each section header: show/hide with checkmarks), so users can reduce clutter or focus on one filter type without opening Settings.
+2. **Filter section visibility** — Allow Library, Collections, Rating, and Tags filter sections to be individually shown or hidden quickly. **Control via context menus** (e.g. on each section header: show/hide with checkmarks), so users can reduce clutter or focus on one filter type without opening Settings.
 
 ### Future / Larger Scope
 
-4. **Custom metadata** — User-defined key-value metadata (e.g. "Director", "Location").
+3. **Custom metadata** — User-defined key-value metadata (e.g. "Director", "Location").
 
 5. **Full documentation (web-based)** — Comprehensive user and developer documentation hosted on the web.
 
@@ -34,5 +32,7 @@
 
 ### Completed
 
-- **Keyboard shortcuts** — Done. Menu commands include Cmd+Delete (delete), Cmd+Shift+R (remove from library), Cmd+Return (play in external player), Cmd+Shift+O (add folder), Cmd+Shift+S (Surprise Me), Cmd+Option+T (clear tag filters), and others; discoverable in the menu bar when a library is open.
+- **Keyboard shortcuts** — Done.
+
+- **Appearance (Light / Dark / System)** — Done. Settings → Application. Menu commands include Cmd+Delete (delete), Cmd+Shift+R (remove from library), Cmd+Return (play in external player), Cmd+Shift+O (add folder), Cmd+Shift+S (Surprise Me), Cmd+Option+T (clear tag filters), and others; discoverable in the menu bar when a library is open.
 

@@ -2,30 +2,36 @@ import GRDB
 import SwiftUI
 
 struct SettingsView: View {
-    let dbPool: GRDB.DatabasePool
-    @Bindable var viewModel: LibraryViewModel
+    @Bindable var appState: AppState
 
     var body: some View {
         TabView {
-            LibrarySettingsView(viewModel: viewModel)
+            ApplicationSettingsView(appState: appState)
                 .tabItem {
-                    Label("Library", systemImage: "books.vertical")
+                    Label("Application", systemImage: "app")
                 }
 
-            VideoSettingsView(viewModel: viewModel)
-                .tabItem {
-                    Label("Video", systemImage: "film")
-                }
+            if let pool = appState.dbManager?.dbPool, let vm = appState.libraryViewModel {
+                LibrarySettingsView(viewModel: vm)
+                    .tabItem {
+                        Label("Library", systemImage: "books.vertical")
+                    }
 
-            DataSourcesSettingsView(dbPool: dbPool)
-                .tabItem {
-                    Label("Data Sources", systemImage: "folder")
-                }
+                VideoSettingsView(viewModel: vm)
+                    .tabItem {
+                        Label("Video", systemImage: "film")
+                    }
 
-            FileExtSettingsView()
-                .tabItem {
-                    Label("File Ext", systemImage: "doc.badge.gearshape")
-                }
+                DataSourcesSettingsView(dbPool: pool)
+                    .tabItem {
+                        Label("Data Sources", systemImage: "folder")
+                    }
+
+                FileExtSettingsView()
+                    .tabItem {
+                        Label("File Ext", systemImage: "doc.badge.gearshape")
+                    }
+            }
         }
         .frame(minWidth: 500, minHeight: 350)
     }

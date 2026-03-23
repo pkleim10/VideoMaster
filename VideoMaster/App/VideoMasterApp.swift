@@ -179,12 +179,7 @@ struct VideoMasterApp: App {
         }
 
         Settings {
-            if let pool = appState.dbManager?.dbPool, let vm = appState.libraryViewModel {
-                SettingsView(dbPool: pool, viewModel: vm)
-            } else {
-                Text("Open a library to access settings")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            SettingsView(appState: appState)
         }
     }
 }
