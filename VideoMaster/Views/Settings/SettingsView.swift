@@ -92,6 +92,12 @@ struct LibrarySettingsView: View {
 
                 filterRow(title: "Missing", isOn: $viewModel.showMissing)
             }
+
+            Section {
+                Toggle("Collapse filters when moving up from strip", isOn: $viewModel.collapseFilterStripWhenUnhovered)
+            } footer: {
+                Text("When enabled, the filter strip shrinks to a thin bar only after you leave it by moving up into the list or grid. Leaving sideways or downward keeps the strip expanded. Hovering expands it again; your saved splitter height is not changed by collapsing.")
+            }
         }
         .formStyle(.grouped)
         .padding()

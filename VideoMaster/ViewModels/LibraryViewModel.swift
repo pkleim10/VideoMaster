@@ -200,6 +200,7 @@ final class LibraryViewModel {
     private static let showDuplicatesKey = "VideoMaster.showDuplicates"
     private static let showCorruptKey = "VideoMaster.showCorrupt"
     private static let showMissingKey = "VideoMaster.showMissing"
+    private static let collapseFilterStripWhenUnhoveredKey = "VideoMaster.collapseFilterStripWhenUnhovered"
     private static let missingCountScannedKey = "VideoMaster.missingCountScanned"
     private static let missingVideoIdsKey = "VideoMaster.missingVideoIds"
 
@@ -340,6 +341,13 @@ final class LibraryViewModel {
     var autoAdjustVideoPane: Bool = false {
         didSet {
             UserDefaults.standard.set(autoAdjustVideoPane, forKey: Self.autoAdjustVideoPaneKey)
+        }
+    }
+
+    /// When true, the bottom filter strip shrinks to a minimal bar unless the pointer is over it; saved splitter height is unchanged.
+    var collapseFilterStripWhenUnhovered: Bool = false {
+        didSet {
+            UserDefaults.standard.set(collapseFilterStripWhenUnhovered, forKey: Self.collapseFilterStripWhenUnhoveredKey)
         }
     }
 
@@ -573,6 +581,9 @@ final class LibraryViewModel {
             autoAdjustVideoPane = pad > 0
             defaults.removeObject(forKey: Self.legacyAutoAdjustVideoPanePaddingKey)
             defaults.set(autoAdjustVideoPane, forKey: Self.autoAdjustVideoPaneKey)
+        }
+        if defaults.object(forKey: Self.collapseFilterStripWhenUnhoveredKey) != nil {
+            collapseFilterStripWhenUnhovered = defaults.bool(forKey: Self.collapseFilterStripWhenUnhoveredKey)
         }
 
         // Load layouts (with migration from legacy keys)

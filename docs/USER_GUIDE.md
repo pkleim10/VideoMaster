@@ -176,7 +176,7 @@ Open **VideoMaster → Settings…** (standard macOS Settings window).
 | Tab | What you’ll find |
 |-----|-------------------|
 | **Application** | **Appearance:** **System** (follow macOS light/dark), **Light**, or **Dark** (locks the app to that style). |
-| **Library** | Exclude corrupt files from most filters, confirm before delete, which sidebar rows show (Recently Added, Duplicates, Missing, …) and their options. *(Requires an open library.)* |
+| **Library** | Exclude corrupt files from most filters, confirm before delete, which sidebar rows show (Recently Added, Duplicates, Missing, …) and their options. Optional **Collapse filters when moving up from strip** shrinks the bottom filter strip only after you leave it upward into the list or grid; leaving sideways or down keeps it expanded. Hover restores it (saved splitter height is unchanged). *(Requires an open library.)* |
 | **Video** | Default **filmstrip** grid (rows × columns), regenerate filmstrips, **Surprise Me!** auto-play, **maximum large preview thumbnail (long-edge)**, **auto adjust video pane** toggle (splitter fits preview to media). *(Requires an open library.)* |
 | **Data Sources** | List of watched folders, add/remove, **Show in Finder**. *(Requires an open library.)* |
 | **File Ext** | Which extensions count as video when scanning; add custom extensions or reset to defaults. *(Requires an open library.)* |

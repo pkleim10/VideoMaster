@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+private enum FilterStripSplitMetrics {
+    /// Bottom height when collapsed (pointer left the strip).
+    static let collapsedBottomStripHeight: CGFloat = 28
+    /// Minimum bottom height when expanded (saved splitter / hover).
+    static let expandedMinBottomHeight: CGFloat = 80
+}
+
 /// Vertical stack split: **top** (list/grid) | **bottom** (filter strip). Divider is horizontal.
 /// Heights persist via `LayoutParams.browserTopPaneHeight{Grid,List}` → `updateCurrentLayoutWithSizes(browserTopPaneHeight:)`.
 struct ResizableVerticalSplitView<Top: View, Bottom: View>: NSViewRepresentable {
@@ -9,6 +16,9 @@ struct ResizableVerticalSplitView<Top: View, Bottom: View>: NSViewRepresentable 
     let topPaneHeight: CGFloat
     let topID: AnyHashable
     let bottomID: AnyHashable
+    let collapseFilterStripWhenUnhovered: Bool
+    /// When false (and collapse is on), use collapsed strip height; when true, use saved splitter height.
+    let expandFilterStripToSavedHeight: Bool
     let onTopHeightChanged: (CGFloat) -> Void
     let top: () -> Top
     let bottom: () -> Bottom
@@ -42,6 +52,8 @@ struct ResizableVerticalSplitView<Top: View, Bottom: View>: NSViewRepresentable 
 
     func updateNSView(_ splitView: NSSplitView, context: Context) {
         context.coordinator.onTopHeightChanged = onTopHeightChanged
+        context.coordinator.collapseFilterStripWhenUnhovered = collapseFilterStripWhenUnhovered
+        context.coordinator.expandFilterStripToSavedHeight = expandFilterStripToSavedHeight
         let coord = context.coordinator
 
         coord.syncLayoutModeKey(layoutModeKey)
@@ -95,9 +107,11 @@ struct ResizableVerticalSplitView<Top: View, Bottom: View>: NSViewRepresentable 
         var lastTopID: AnyHashable?
         var lastBottomID: AnyHashable?
         var lastLayoutModeKey: String?
+        var collapseFilterStripWhenUnhovered = false
+        var expandFilterStripToSavedHeight = true
         var isProgrammaticResize = false
-        /// Last `topPaneHeight` we applied from `LayoutParams` (avoids fighting user drags).
-        fileprivate var lastAppliedTopPaneHeightFromModel: CGFloat?
+        /// Last divider position (top pane height) we applied from the model or hover collapse.
+        fileprivate var lastAppliedTopPosition: CGFloat?
 
         /// After first `setPosition` from saved layout; until then, ignore spurious resize notifications on launch.
         private var hasAppliedInitialTopHeight = false
@@ -105,13 +119,25 @@ struct ResizableVerticalSplitView<Top: View, Bottom: View>: NSViewRepresentable 
         fileprivate func syncLayoutModeKey(_ key: String) {
             if lastLayoutModeKey != key {
                 lastLayoutModeKey = key
-                lastAppliedTopPaneHeightFromModel = nil
+                lastAppliedTopPosition = nil
                 hasAppliedInitialTopHeight = false
             }
         }
 
+        /// Target top pane height from saved layout and collapse/hover state.
+        fileprivate func targetTopPaneHeight(modelTop: CGFloat, totalHeight: CGFloat) -> CGFloat {
+            if collapseFilterStripWhenUnhovered, !expandFilterStripToSavedHeight {
+                let divider: CGFloat = 1
+                let top = totalHeight - FilterStripSplitMetrics.collapsedBottomStripHeight - divider
+                return min(max(top, 100), totalHeight - FilterStripSplitMetrics.collapsedBottomStripHeight - divider)
+            }
+            return min(max(modelTop, 100), totalHeight - FilterStripSplitMetrics.expandedMinBottomHeight)
+        }
+
         func splitViewDidResizeSubviews(_ notification: Notification) {
             guard !isProgrammaticResize else { return }
+            // While collapsed, top height is ~full window — do not overwrite saved splitter position on resize.
+            if collapseFilterStripWhenUnhovered, !expandFilterStripToSavedHeight { return }
             guard let sv = notification.object as? NSSplitView, sv.arrangedSubviews.count >= 2 else { return }
             let topH = sv.arrangedSubviews[0].frame.height
             let bottomH = sv.arrangedSubviews[1].frame.height
@@ -134,8 +160,13 @@ struct ResizableVerticalSplitView<Top: View, Bottom: View>: NSViewRepresentable 
         func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt index: Int) -> CGFloat {
             let total = splitView.bounds.height
             switch index {
-            case 0: return total - 80
-            default: return proposedMaximumPosition
+            case 0:
+                let minBottom = (collapseFilterStripWhenUnhovered && !expandFilterStripToSavedHeight)
+                    ? FilterStripSplitMetrics.collapsedBottomStripHeight
+                    : FilterStripSplitMetrics.expandedMinBottomHeight
+                return min(proposedMaximumPosition, total - minBottom)
+            default:
+                return proposedMaximumPosition
             }
         }
 
@@ -144,15 +175,15 @@ struct ResizableVerticalSplitView<Top: View, Bottom: View>: NSViewRepresentable 
             totalHeight: CGFloat,
             splitView: NSSplitView
         ) {
-            let clamped = min(max(topPaneHeight, 100), totalHeight - 80)
+            let clamped = targetTopPaneHeight(modelTop: topPaneHeight, totalHeight: totalHeight)
             let shouldApply: Bool
-            if let prev = lastAppliedTopPaneHeightFromModel {
+            if let prev = lastAppliedTopPosition {
                 shouldApply = abs(prev - clamped) > 0.5
             } else {
                 shouldApply = true
             }
             guard shouldApply else { return }
-            lastAppliedTopPaneHeightFromModel = clamped
+            lastAppliedTopPosition = clamped
             isProgrammaticResize = true
             splitView.setPosition(clamped, ofDividerAt: 0)
             isProgrammaticResize = false
