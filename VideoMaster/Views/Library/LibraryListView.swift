@@ -207,6 +207,15 @@ struct LibraryListView: View {
         }
         .id(viewModel.filteredVideosVersion)
         .background(TableScrollHelper(scrollToRow: scrollToRow))
+        // Backup: didSet on `isPlayingInline` restores columns before persisting; one delayed pass catches
+        // a late SwiftUI table layout pass after unfreeze.
+        .onChange(of: viewModel.isPlayingInline) { _, playing in
+            guard !playing else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(80))
+                viewModel.reapplyListColumnCustomizationAfterPlaybackExit()
+            }
+        }
         .onAppear {
             if viewModel.scrollToSelectedOnViewSwitch {
                 viewModel.scrollToSelectedOnViewSwitch = false

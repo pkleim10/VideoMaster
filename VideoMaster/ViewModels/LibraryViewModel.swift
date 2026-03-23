@@ -100,7 +100,19 @@ final class LibraryViewModel {
     }
     var lastSelectedVideoId: String?
     var filmstripRefreshId: Int = 0
-    var isPlayingInline: Bool = false
+    var isPlayingInline: Bool = false {
+        didSet {
+            // Leaving playback: restore list `Table` column widths from saved JSON *before* flushing live state.
+            // If we `updateCurrentLayoutFromLive()` first, SwiftUI may have already reset `columnCustomization`
+            // to defaults — that snapshot would overwrite `browsingLayout` and defeat re-apply.
+            if oldValue, !isPlayingInline {
+                reapplyListColumnCustomizationAfterPlaybackExit()
+                if viewMode != .list {
+                    updateCurrentLayoutFromLive()
+                }
+            }
+        }
+    }
     /// Set before `isPlayingInline = true` on filmstrip tap; consumed when creating the inline player (Space leaves nil → start at 0).
     var pendingFilmstripSeekSeconds: Double?
     var pendingAutoPlay: Bool = false
@@ -407,10 +419,28 @@ final class LibraryViewModel {
         }
     }
 
+    /// Re-applies list `Table` column widths after inline playback (SwiftUI can reset widths when the browser column unfreezes).
+    func reapplyListColumnCustomizationAfterPlaybackExit() {
+        guard viewMode == .list else { return }
+        let blob: Data
+        if let p = playbackLayout, let d = p.columnCustomizationData, !d.isEmpty {
+            blob = d
+        } else if let d = browsingLayout.columnCustomizationData, !d.isEmpty {
+            blob = d
+        } else {
+            return
+        }
+        guard let saved = try? JSONDecoder().decode(TableColumnCustomization<Video>.self, from: blob) else { return }
+        _applyingLayout = true
+        columnCustomization = saved
+        _applyingLayout = false
+        updateCurrentLayoutFromLive()
+    }
+
     /// Persist current live values (view mode, grid size, sidebar, columns) to the active mode's layout.
     func updateCurrentLayoutFromLive() {
         let base = effectiveLayout
-        let colData = try? JSONEncoder().encode(columnCustomization)
+        let colData = (try? JSONEncoder().encode(columnCustomization)) ?? base.columnCustomizationData
         let layout = LayoutParams(
             sidebarWidth: base.sidebarWidth,
             contentWidthGrid: base.contentWidthGrid,
@@ -442,6 +472,9 @@ final class LibraryViewModel {
     ) {
         let base = effectiveLayout
         var updated = LayoutParams.from(playback: base)
+        // Always carry live table column widths; `base` may have stale columnCustomizationData
+        // (e.g. browsing snapshot from before playback while list was customized during playback).
+        updated.columnCustomizationData = (try? JSONEncoder().encode(columnCustomization)) ?? base.columnCustomizationData
         if let w = sidebarWidth { updated.sidebarWidth = Double(w) }
         if let w = contentWidth {
             switch viewMode {

@@ -3,6 +3,9 @@ import SwiftUI
 
 /// Two-column split: **browser** (list/grid + optional inner layout) | **detail**.
 /// Same freeze/clipping behavior as `ResizableSplitView` for inline playback on the browser column.
+/// The browser `NSHostingView` always receives `rootView` updates (even while the column is frozen/clipped)
+/// so SwiftUI state (including list `Table` column customization) stays in sync. Grid may do more work
+/// during playback than the old “skip updates while frozen” optimization.
 struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepresentable {
     /// When this changes (e.g. grid ↔ list), reset applied-width tracking so the correct mode’s saved width applies.
     let layoutModeKey: String
@@ -109,15 +112,13 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
             coord.browsingDividerPosition = nil
         }
 
-        if !freezeContent {
-            if let container = subviews[0] as? ClippingContainer,
-               let contentHost = container.subviews.first as? NSHostingView<Content>
-            {
-                if coord.lastContentID != contentID {
-                    coord.lastContentID = contentID
-                }
-                contentHost.rootView = content()
+        if let container = subviews[0] as? ClippingContainer,
+           let contentHost = container.subviews.first as? NSHostingView<Content>
+        {
+            if coord.lastContentID != contentID {
+                coord.lastContentID = contentID
             }
+            contentHost.rootView = content()
         }
         if let detailHost = subviews[1] as? NSHostingView<Detail>, coord.lastDetailID != detailID {
             coord.lastDetailID = detailID
