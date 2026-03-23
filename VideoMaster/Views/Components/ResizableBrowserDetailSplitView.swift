@@ -80,15 +80,25 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
                 }
             }
         } else if !freezeContent, let container = coord.contentContainer, container.isFrozen {
-            container.unfreeze()
-            if let saved = coord.browsingDividerPosition {
-                DispatchQueue.main.async { [weak coord, weak splitView] in
-                    guard let coord, let splitView else { return }
-                    coord.isProgrammaticResize = true
-                    splitView.setPosition(saved, ofDividerAt: 0)
-                    coord.isProgrammaticResize = false
+            // Restore the browsing column width synchronously when possible, and sync
+            // `lastAppliedContentWidthFromModel` so `applyModelBrowserWidthIfNeeded` below
+            // does not issue a second `setPosition` (avoids visible jerk on exit play mode).
+            let savedWidth = coord.browsingDividerPosition
+            let totalW = splitView.bounds.width
+            if let savedWidth {
+                if totalW > 0 {
+                    coord.restoreBrowserDividerAfterUnfreeze(savedWidth: savedWidth, totalWidth: totalW, splitView: splitView)
+                } else {
+                    DispatchQueue.main.async { [weak coord, weak splitView] in
+                        guard let coord, let splitView else { return }
+                        splitView.layoutSubtreeIfNeeded()
+                        let tw = splitView.bounds.width
+                        guard tw > 0 else { return }
+                        coord.restoreBrowserDividerAfterUnfreeze(savedWidth: savedWidth, totalWidth: tw, splitView: splitView)
+                    }
                 }
             }
+            container.unfreeze()
             coord.browsingDividerPosition = nil
         }
 
@@ -200,6 +210,21 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
                 lastAppliedContentWidthFromModel = nil
                 hasAppliedInitialBrowserWidth = false
             }
+        }
+
+        /// After unfreezing the browser column, apply the saved divider width once and mark the
+        /// model-applied width so we don't immediately fight it with `applyModelBrowserWidthIfNeeded`.
+        fileprivate func restoreBrowserDividerAfterUnfreeze(
+            savedWidth: CGFloat,
+            totalWidth: CGFloat,
+            splitView: NSSplitView
+        ) {
+            let clamped = min(max(savedWidth, 80), totalWidth - 200)
+            lastAppliedContentWidthFromModel = clamped
+            isProgrammaticResize = true
+            splitView.setPosition(clamped, ofDividerAt: 0)
+            isProgrammaticResize = false
+            hasAppliedInitialBrowserWidth = true
         }
 
         /// Applies divider position from saved layout only when the model width actually changed.

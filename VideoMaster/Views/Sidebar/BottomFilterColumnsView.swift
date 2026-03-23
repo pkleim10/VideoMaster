@@ -81,102 +81,96 @@ struct BottomFilterColumnsView: View {
 
     private var libraryColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("LIBRARY", isExpanded: $viewModel.isLibraryExpanded)
-            if viewModel.isLibraryExpanded {
-                List(selection: $viewModel.sidebarFilter) {
-                    sidebarRow("All Videos", icon: "film.stack", count: viewModel.libraryCounts.all)
-                        .tag(SidebarFilter.all)
-                    if viewModel.showRecentlyAdded {
-                        sidebarRow("Recently Added", icon: "clock", count: viewModel.libraryCounts.recentlyAdded)
-                            .tag(SidebarFilter.recentlyAdded)
-                    }
-                    if viewModel.showRecentlyPlayed {
-                        sidebarRow("Recently Played", icon: "play.circle", count: viewModel.libraryCounts.recentlyPlayed)
-                            .tag(SidebarFilter.recentlyPlayed)
-                    }
-                    if viewModel.showTopRated {
-                        sidebarRow("Top Rated", icon: "star.fill", count: viewModel.libraryCounts.topRated)
-                            .tag(SidebarFilter.topRated)
-                    }
-                    if viewModel.showDuplicates {
-                        sidebarRow("Duplicates", icon: "doc.on.doc", count: viewModel.libraryCounts.duplicates)
-                            .tag(SidebarFilter.duplicates)
-                    }
-                    if viewModel.showCorrupt {
-                        sidebarRow("Corrupt", icon: "exclamationmark.triangle", count: viewModel.libraryCounts.corrupt)
-                            .tag(SidebarFilter.corrupt)
-                    }
-                    if viewModel.showMissing {
-                        sidebarRow("Missing", icon: "questionmark.circle", count: viewModel.libraryCounts.missing, unscanned: !viewModel.missingCountScanned)
-                            .tag(SidebarFilter.missing)
-                    }
+            sectionHeader("LIBRARY")
+            List(selection: $viewModel.sidebarFilter) {
+                sidebarRow("All Videos", icon: "film.stack", count: viewModel.libraryCounts.all)
+                    .tag(SidebarFilter.all)
+                if viewModel.showRecentlyAdded {
+                    sidebarRow("Recently Added", icon: "clock", count: viewModel.libraryCounts.recentlyAdded)
+                        .tag(SidebarFilter.recentlyAdded)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 120)
+                if viewModel.showRecentlyPlayed {
+                    sidebarRow("Recently Played", icon: "play.circle", count: viewModel.libraryCounts.recentlyPlayed)
+                        .tag(SidebarFilter.recentlyPlayed)
+                }
+                if viewModel.showTopRated {
+                    sidebarRow("Top Rated", icon: "star.fill", count: viewModel.libraryCounts.topRated)
+                        .tag(SidebarFilter.topRated)
+                }
+                if viewModel.showDuplicates {
+                    sidebarRow("Duplicates", icon: "doc.on.doc", count: viewModel.libraryCounts.duplicates)
+                        .tag(SidebarFilter.duplicates)
+                }
+                if viewModel.showCorrupt {
+                    sidebarRow("Corrupt", icon: "exclamationmark.triangle", count: viewModel.libraryCounts.corrupt)
+                        .tag(SidebarFilter.corrupt)
+                }
+                if viewModel.showMissing {
+                    sidebarRow("Missing", icon: "questionmark.circle", count: viewModel.libraryCounts.missing, unscanned: !viewModel.missingCountScanned)
+                        .tag(SidebarFilter.missing)
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .frame(minHeight: 120)
         }
         .padding(8)
     }
 
     private var collectionsColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("COLLECTIONS", isExpanded: $viewModel.isCollectionsExpanded)
-            if viewModel.isCollectionsExpanded {
-                if viewModel.collections.isEmpty {
-                    Text("No collections")
-                        .foregroundStyle(.tertiary)
-                        .font(.caption)
-                        .padding(.vertical, 4)
-                } else if viewModel.collections.count <= Self.maxVisibleItems {
-                    List(selection: $viewModel.sidebarFilter) {
-                        ForEach(viewModel.collections, id: \.listId) { collection in
-                            collectionRow(collection)
-                                .tag(SidebarFilter.collection(collection))
-                                .contextMenu {
-                                    Button("Edit Collection\u{2026}") {
-                                        editingCollection = collection
-                                    }
-                                    Divider()
-                                    Button("Delete Collection", role: .destructive) {
-                                        Task { await viewModel.deleteCollection(collection) }
-                                    }
+            sectionHeader("COLLECTIONS")
+            if viewModel.collections.isEmpty {
+                Text("No collections")
+                    .foregroundStyle(.tertiary)
+                    .font(.caption)
+                    .padding(.vertical, 4)
+            } else if viewModel.collections.count <= Self.maxVisibleItems {
+                List(selection: $viewModel.sidebarFilter) {
+                    ForEach(viewModel.collections, id: \.listId) { collection in
+                        collectionRow(collection)
+                            .tag(SidebarFilter.collection(collection))
+                            .contextMenu {
+                                Button("Edit Collection\u{2026}") {
+                                    editingCollection = collection
                                 }
-                        }
+                                Divider()
+                                Button("Delete Collection", role: .destructive) {
+                                    Task { await viewModel.deleteCollection(collection) }
+                                }
+                            }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 80)
-                } else {
-                    scrollableCollections
                 }
-
-                Button(action: { showNewCollectionSheet = true }) {
-                    Label("New Collection", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-                .padding(.top, 4)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 80)
+            } else {
+                scrollableCollections
             }
+
+            Button(action: { showNewCollectionSheet = true }) {
+                Label("New Collection", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .font(.caption)
+            .padding(.top, 4)
         }
         .padding(8)
     }
 
     private var ratingColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("RATING", isExpanded: $viewModel.isRatingExpanded)
-            if viewModel.isRatingExpanded {
-                List(selection: $viewModel.sidebarFilter) {
-                    ForEach((1...5).reversed(), id: \.self) { stars in
-                        ratingRow(stars: stars, count: viewModel.libraryCounts.byRating[stars] ?? 0)
-                            .tag(SidebarFilter.rating(stars))
-                    }
+            ratingSectionHeader
+            List(selection: $viewModel.sidebarFilter) {
+                ForEach((1...5).reversed(), id: \.self) { stars in
+                    ratingRow(stars: stars, count: viewModel.libraryCounts.byRating[stars] ?? 0)
+                        .tag(SidebarFilter.rating(stars))
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 120)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .frame(minHeight: 120)
         }
         .padding(8)
     }
@@ -184,35 +178,33 @@ struct BottomFilterColumnsView: View {
     private var tagsColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
             tagsSectionHeader
-            if viewModel.isTagsExpanded {
-                if viewModel.tags.isEmpty {
-                    Text("No tags yet")
-                        .foregroundStyle(.tertiary)
-                        .font(.caption)
-                        .padding(.vertical, 4)
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(viewModel.tags, id: \.listId) { tag in
-                                tagRow(tag)
-                                    .contextMenu { tagContextMenu(tag) }
-                            }
+            if viewModel.tags.isEmpty {
+                Text("No tags yet")
+                    .foregroundStyle(.tertiary)
+                    .font(.caption)
+                    .padding(.vertical, 4)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(viewModel.tags, id: \.listId) { tag in
+                            tagRow(tag)
+                                .contextMenu { tagContextMenu(tag) }
                         }
                     }
-                    .frame(minHeight: 80)
                 }
-
-                Button(action: {
-                    newTagName = ""
-                    showNewTag = true
-                }) {
-                    Label("New Tag", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-                .padding(.top, 4)
+                .frame(minHeight: 80)
             }
+
+            Button(action: {
+                newTagName = ""
+                showNewTag = true
+            }) {
+                Label("New Tag", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .font(.caption)
+            .padding(.top, 4)
         }
         .padding(8)
     }
@@ -262,20 +254,30 @@ struct BottomFilterColumnsView: View {
         .frame(maxHeight: Self.rowHeight * CGFloat(Self.maxVisibleItems))
     }
 
+    private var ratingSectionHeader: some View {
+        HStack(spacing: 4) {
+            Text("RATING")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if case .rating = viewModel.sidebarFilter {
+                Button("Remove Filter") {
+                    viewModel.sidebarFilter = .all
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .buttonStyle(.borderless)
+                .help("Clear rating filter")
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
     private var tagsSectionHeader: some View {
         HStack(spacing: 4) {
-            Button(action: { withAnimation { viewModel.isTagsExpanded.toggle() } }) {
-                HStack(spacing: 4) {
-                    Image(systemName: viewModel.isTagsExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 12)
-                    Text("TAGS")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
+            Text("TAGS")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
             Spacer()
             if !viewModel.tags.isEmpty {
                 Button(action: {
@@ -294,18 +296,18 @@ struct BottomFilterColumnsView: View {
                 }
                 .buttonStyle(.plain)
                 if !viewModel.selectedTagIds.isEmpty {
-                    Button(action: { viewModel.clearTagFilters() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                    Button("Remove Filter") {
+                        viewModel.clearTagFilters()
                     }
-                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(.borderless)
                     .help("Clear tag filters")
                 }
             }
         }
         .contextMenu {
-            Button("Clear Tag Filters") {
+            Button("Remove Filter") {
                 viewModel.clearTagFilters()
             }
             .disabled(viewModel.selectedTagIds.isEmpty)
@@ -313,21 +315,12 @@ struct BottomFilterColumnsView: View {
         }
     }
 
-    private func sectionHeader(_ title: String, isExpanded: Binding<Bool>) -> some View {
-        Button(action: { withAnimation { isExpanded.wrappedValue.toggle() } }) {
-            HStack(spacing: 4) {
-                Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12)
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-        }
-        .buttonStyle(.plain)
-        .padding(.bottom, 4)
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 4)
     }
 
     private func tagRow(_ tag: Tag) -> some View {

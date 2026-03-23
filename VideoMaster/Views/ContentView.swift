@@ -35,9 +35,9 @@ private struct LibraryContentView: View {
         vm.lastSelectedVideoId ?? ""
     }
 
-    /// Identity for the bottom filter strip hosting view (collections/tags counts, expand state).
+    /// Identity for the bottom filter strip hosting view (collections/tags counts).
     private var filterStripHostID: String {
-        "\(vm.sidebarFilter.hashValue)-\(vm.isLibraryExpanded)-\(vm.isCollectionsExpanded)-\(vm.isRatingExpanded)-\(vm.isTagsExpanded)-\(vm.collections.count)-\(vm.tags.count)-\(vm.libraryCounts.all)-\(vm.showRecentlyAdded)-\(vm.showRecentlyPlayed)-\(vm.showTopRated)-\(vm.showDuplicates)-\(vm.showCorrupt)-\(vm.showMissing)"
+        "\(vm.sidebarFilter.hashValue)-\(vm.collections.count)-\(vm.tags.count)-\(vm.libraryCounts.all)-\(vm.showRecentlyAdded)-\(vm.showRecentlyPlayed)-\(vm.showTopRated)-\(vm.showDuplicates)-\(vm.showCorrupt)-\(vm.showMissing)"
     }
 
     /// Column targets for the split view always follow browsing layout so toggling playback

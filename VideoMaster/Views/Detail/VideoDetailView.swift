@@ -133,7 +133,10 @@ struct VideoDetailView: View {
             scheduleAutoAdjustVideoPane()
         }
         .onChange(of: viewModel.isPlayingInline) { _, _ in
-            scheduleAutoAdjustVideoPane()
+            // Defer until after layout so `detailPaneSize` reflects chrome (picker, hints) after exit play mode.
+            DispatchQueue.main.async {
+                scheduleAutoAdjustVideoPane()
+            }
         }
         .onChange(of: viewModel.autoAdjustVideoPane) { _, _ in
             scheduleAutoAdjustVideoPane()

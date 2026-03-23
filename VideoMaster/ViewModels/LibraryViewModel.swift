@@ -363,31 +363,6 @@ final class LibraryViewModel {
         }
     }
 
-    var isLibraryExpanded: Bool = true {
-        didSet {
-            guard !_applyingLayout else { return }
-            updateCurrentLayoutFromLive()
-        }
-    }
-    var isCollectionsExpanded: Bool = true {
-        didSet {
-            guard !_applyingLayout else { return }
-            updateCurrentLayoutFromLive()
-        }
-    }
-    var isRatingExpanded: Bool = true {
-        didSet {
-            guard !_applyingLayout else { return }
-            updateCurrentLayoutFromLive()
-        }
-    }
-    var isTagsExpanded: Bool = true {
-        didSet {
-            guard !_applyingLayout else { return }
-            updateCurrentLayoutFromLive()
-        }
-    }
-
     private enum LayoutMode { case browsing, playback }
     private var layoutSaveTask: DispatchWorkItem?
 
@@ -430,22 +405,11 @@ final class LibraryViewModel {
                 columnCustomization = saved
             }
         }
-        // Sidebar expanded state always comes from layout
-        isLibraryExpanded = layout.sidebarExpanded["library"] ?? true
-        isCollectionsExpanded = layout.sidebarExpanded["collections"] ?? true
-        isRatingExpanded = layout.sidebarExpanded["rating"] ?? true
-        isTagsExpanded = layout.sidebarExpanded["tags"] ?? true
     }
 
     /// Persist current live values (view mode, grid size, sidebar, columns) to the active mode's layout.
     func updateCurrentLayoutFromLive() {
         let base = effectiveLayout
-        let state: [String: Bool] = [
-            "library": isLibraryExpanded,
-            "collections": isCollectionsExpanded,
-            "rating": isRatingExpanded,
-            "tags": isTagsExpanded,
-        ]
         let colData = try? JSONEncoder().encode(columnCustomization)
         let layout = LayoutParams(
             sidebarWidth: base.sidebarWidth,
@@ -456,7 +420,6 @@ final class LibraryViewModel {
             browserTopPaneHeightGrid: base.browserTopPaneHeightGrid,
             browserTopPaneHeightList: base.browserTopPaneHeightList,
             detailVideoHeight: base.detailVideoHeight,
-            sidebarExpanded: state,
             columnCustomizationData: colData,
             viewMode: viewMode.rawValue,
             gridSize: gridSize.rawValue
@@ -593,9 +556,6 @@ final class LibraryViewModel {
             if let w = defaults.object(forKey: "VideoMaster.detailWidth") as? Double, w > 0 {
                 migrated.detailWidthGrid = w
                 migrated.detailWidthList = w
-            }
-            if let state = defaults.dictionary(forKey: "VideoMaster.sidebarExpanded") as? [String: Bool] {
-                migrated.sidebarExpanded = state
             }
             if let data = defaults.data(forKey: "VideoMaster.columnCustomization"),
                let _ = try? JSONDecoder().decode(TableColumnCustomization<Video>.self, from: data)
