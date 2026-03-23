@@ -69,16 +69,23 @@ struct ResizableBrowserDetailSplitView<Content: View, Detail: View>: NSViewRepre
             if let hosted = container.subviews.first {
                 hosted.layoutSubtreeIfNeeded()
             }
+            // Width to restore on exit (pre-playback column size), before any playback divider snap.
             coord.browsingDividerPosition = subviews[0].frame.width
-            container.freeze()
-            if let savedBrowser = coord.playbackDividerPositions?.browser {
-                DispatchQueue.main.async { [weak coord, weak splitView] in
-                    guard let coord, let splitView else { return }
-                    coord.isProgrammaticResize = true
-                    splitView.setPosition(savedBrowser, ofDividerAt: 0)
-                    coord.isProgrammaticResize = false
+            // Match exit path: apply saved playback divider synchronously, then freeze — avoids
+            // freeze-then-async setPosition (two visible steps when entering play mode).
+            let totalW = splitView.bounds.width
+            if totalW > 0, let savedBrowser = coord.playbackDividerPositions?.browser {
+                let clamped = min(max(savedBrowser, 80), totalW - 200)
+                coord.isProgrammaticResize = true
+                splitView.setPosition(clamped, ofDividerAt: 0)
+                coord.isProgrammaticResize = false
+                splitView.layoutSubtreeIfNeeded()
+                container.layoutSubtreeIfNeeded()
+                if let hosted = container.subviews.first {
+                    hosted.layoutSubtreeIfNeeded()
                 }
             }
+            container.freeze()
         } else if !freezeContent, let container = coord.contentContainer, container.isFrozen {
             // Restore the browsing column width synchronously when possible, and sync
             // `lastAppliedContentWidthFromModel` so `applyModelBrowserWidthIfNeeded` below
