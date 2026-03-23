@@ -400,13 +400,19 @@ final class LibraryViewModel {
             case .browsing: layout = self.browsingLayout
             case .playback: guard let p = self.playbackLayout else { return }; layout = p
             }
-            let safe = layout.sanitized()
-            guard let data = try? JSONEncoder().encode(safe) else { return }
-            let key = mode == .browsing ? Self.browsingLayoutKey : Self.playbackLayoutKey
-            UserDefaults.standard.set(data, forKey: key)
+            Self.encodeLayoutToUserDefaults(layout, mode: mode)
         }
         layoutSaveTask = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        // Next run loop coalesces rapid updates; no delay so quit-after-drag still persists.
+        DispatchQueue.main.async(execute: work)
+    }
+
+    /// Writes layout JSON immediately (used when split views report sizes; does not rely on `didSet` / debounce).
+    private static func encodeLayoutToUserDefaults(_ layout: LayoutParams, mode: LayoutMode) {
+        let safe = layout.sanitized()
+        guard let data = try? JSONEncoder().encode(safe) else { return }
+        let key = mode == .browsing ? browsingLayoutKey : playbackLayoutKey
+        UserDefaults.standard.set(data, forKey: key)
     }
 
     /// Apply a layout to the live UI properties. Call when switching modes.
@@ -447,6 +453,8 @@ final class LibraryViewModel {
             detailWidthGrid: base.detailWidthGrid,
             contentWidthList: base.contentWidthList,
             detailWidthList: base.detailWidthList,
+            browserTopPaneHeightGrid: base.browserTopPaneHeightGrid,
+            browserTopPaneHeightList: base.browserTopPaneHeightList,
             detailVideoHeight: base.detailVideoHeight,
             sidebarExpanded: state,
             columnCustomizationData: colData,
@@ -462,7 +470,13 @@ final class LibraryViewModel {
     }
 
     /// Update layout with new size values from resize gestures. Call when user drags a divider.
-    func updateCurrentLayoutWithSizes(sidebarWidth: CGFloat? = nil, contentWidth: CGFloat? = nil, detailWidth: CGFloat? = nil, detailVideoHeight: CGFloat? = nil) {
+    func updateCurrentLayoutWithSizes(
+        sidebarWidth: CGFloat? = nil,
+        contentWidth: CGFloat? = nil,
+        detailWidth: CGFloat? = nil,
+        browserTopPaneHeight: CGFloat? = nil,
+        detailVideoHeight: CGFloat? = nil
+    ) {
         let base = effectiveLayout
         var updated = LayoutParams.from(playback: base)
         if let w = sidebarWidth { updated.sidebarWidth = Double(w) }
@@ -478,12 +492,21 @@ final class LibraryViewModel {
             case .list: updated.detailWidthList = Double(w)
             }
         }
+        if let h = browserTopPaneHeight {
+            switch viewMode {
+            case .grid: updated.browserTopPaneHeightGrid = Double(h)
+            case .list: updated.browserTopPaneHeightList = Double(h)
+            }
+        }
         if let h = detailVideoHeight { updated.detailVideoHeight = Double(h) }
         let fixed = updated.sanitized()
         if isPlayingInline {
             playbackLayout = fixed
+            Self.encodeLayoutToUserDefaults(fixed, mode: .playback)
         } else {
             browsingLayout = fixed
+            // Always persist split sizes immediately (Observable may coalesce equal structs; didSet save is async).
+            Self.encodeLayoutToUserDefaults(fixed, mode: .browsing)
         }
     }
 
@@ -615,7 +638,9 @@ final class LibraryViewModel {
             }
             do {
                 for try await videos in observation.values(in: dbPool) {
-                    self.videos = videos
+                    await MainActor.run {
+                        self.videos = videos
+                    }
                 }
             } catch {
                 if !Task.isCancelled {

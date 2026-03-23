@@ -121,6 +121,7 @@ struct LibraryGridView: View {
         }
         .id(viewModel.filteredVideosVersion)
         .focusable()
+        .focusEffectDisabled(true)
         .focused($gridArrowKeyFocused)
         .onKeyPress(.upArrow) {
             guard !viewModel.isEditingText else { return .ignored }

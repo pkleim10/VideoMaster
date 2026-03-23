@@ -1,4 +1,5 @@
 import AVKit
+import AppKit
 import SwiftUI
 
 struct VideoDetailView: View {

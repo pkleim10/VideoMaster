@@ -16,7 +16,8 @@ struct ContentView: View {
 }
 
 private struct LibraryContentView: View {
-    let vm: LibraryViewModel
+    /// Required so `browsingLayout` changes invalidate `NSViewRepresentable` and apply saved split positions.
+    @Bindable var vm: LibraryViewModel
     let thumbService: ThumbnailService
     /// Persists across content host rootView replacements (playback/browsing switch, layout changes).
     @State private var gridScrollPositionId: String?
@@ -30,41 +31,54 @@ private struct LibraryContentView: View {
         return "VideoMaster — \(name)"
     }
 
-    private var sidebarID: String {
-        "\(vm.sidebarFilter.hashValue)-\(vm.isLibraryExpanded)-\(vm.isCollectionsExpanded)-\(vm.isRatingExpanded)-\(vm.isTagsExpanded)-\(vm.collections.count)-\(vm.tags.count)-\(vm.libraryCounts.all)-\(vm.showRecentlyAdded)-\(vm.showRecentlyPlayed)-\(vm.showTopRated)-\(vm.showDuplicates)-\(vm.showCorrupt)-\(vm.showMissing)"
-    }
-
     private var detailID: String {
         vm.lastSelectedVideoId ?? ""
     }
 
+    /// Identity for the bottom filter strip hosting view (collections/tags counts, expand state).
+    private var filterStripHostID: String {
+        "\(vm.sidebarFilter.hashValue)-\(vm.isLibraryExpanded)-\(vm.isCollectionsExpanded)-\(vm.isRatingExpanded)-\(vm.isTagsExpanded)-\(vm.collections.count)-\(vm.tags.count)-\(vm.libraryCounts.all)-\(vm.showRecentlyAdded)-\(vm.showRecentlyPlayed)-\(vm.showTopRated)-\(vm.showDuplicates)-\(vm.showCorrupt)-\(vm.showMissing)"
+    }
+
     /// Column targets for the split view always follow browsing layout so toggling playback
     /// does not change effective widths (avoids a layout pulse / grid jump before freeze).
-    private var browsingSplitSidebarWidth: CGFloat { CGFloat(vm.browsingLayout.sidebarWidth) }
     private var browsingSplitContentWidth: CGFloat {
         CGFloat(vm.browsingLayout.contentColumnWidth(for: vm.viewMode))
     }
     private var browsingSplitDetailWidth: CGFloat {
         CGFloat(vm.browsingLayout.detailColumnWidth(for: vm.viewMode))
     }
+    private var browsingSplitTopPaneHeight: CGFloat {
+        CGFloat(vm.browsingLayout.browserTopPaneHeight(for: vm.viewMode))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ResizableSplitView(
-                sidebarWidth: browsingSplitSidebarWidth,
+            // Browser column = list/grid + bottom filter columns; detail = right pane.
+            // Persists via `LayoutParams` (content/detail widths + `browserTopPaneHeight{Grid,List}`).
+            ResizableBrowserDetailSplitView(
+                layoutModeKey: vm.viewMode.rawValue,
                 contentWidth: browsingSplitContentWidth,
                 detailWidth: browsingSplitDetailWidth,
-                sidebarID: sidebarID,
-                // Include filteredVideosVersion so toolbar/search state updates when the list loads or filters change.
-                // (NSHostingView rootView is only replaced when contentID changes; see ResizableSplitView.)
-                contentID: "\(vm.viewMode.rawValue)-\(vm.videos.isEmpty)-\(vm.filteredVideosVersion)",
+                contentID: "browserShell",
                 detailID: detailID,
                 freezeContent: vm.isPlayingInline,
-                onSizesChanged: { s, c, d in
-                    vm.updateCurrentLayoutWithSizes(sidebarWidth: s, contentWidth: c, detailWidth: d)
+                onSizesChanged: { browserW, detailW in
+                    vm.updateCurrentLayoutWithSizes(sidebarWidth: nil, contentWidth: browserW, detailWidth: detailW)
                 },
-                sidebar: { SidebarView(viewModel: vm).frame(minWidth: 120) },
-                content: { libraryContent },
+                content: {
+                    ResizableVerticalSplitView(
+                        layoutModeKey: vm.viewMode.rawValue,
+                        topPaneHeight: browsingSplitTopPaneHeight,
+                        topID: vm.viewMode.rawValue,
+                        bottomID: filterStripHostID,
+                        onTopHeightChanged: { h in
+                            vm.updateCurrentLayoutWithSizes(browserTopPaneHeight: h)
+                        },
+                        top: { libraryContent },
+                        bottom: { BottomFilterColumnsView(viewModel: vm) }
+                    )
+                },
                 detail: { detailContent }
             )
             .navigationTitle(navigationTitle)
@@ -331,4 +345,3 @@ private struct LibraryContentView: View {
         .background(.bar)
     }
 }
-

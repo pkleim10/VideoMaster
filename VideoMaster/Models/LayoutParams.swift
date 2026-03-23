@@ -9,6 +9,9 @@ struct LayoutParams: Equatable {
     var detailWidthGrid: Double
     var contentWidthList: Double
     var detailWidthList: Double
+    /// Height of the list/grid area in the left column (above the bottom filter strip). Per view mode.
+    var browserTopPaneHeightGrid: Double
+    var browserTopPaneHeightList: Double
     var detailVideoHeight: Double
     var sidebarExpanded: [String: Bool]
     var columnCustomizationData: Data?
@@ -18,6 +21,8 @@ struct LayoutParams: Equatable {
     static let defaultSidebarWidth: Double = 220
     static let defaultContentWidth: Double = 480
     static let defaultDetailWidth: Double = 480
+    /// Default height for list/grid above the filter strip (left column vertical split).
+    static let defaultBrowserTopPaneHeight: Double = 360
     static let defaultDetailVideoHeight: Double = 336
     static let defaultSidebarExpanded: [String: Bool] = [
         "library": true,
@@ -40,6 +45,13 @@ struct LayoutParams: Equatable {
         }
     }
 
+    func browserTopPaneHeight(for mode: ViewMode) -> Double {
+        switch mode {
+        case .grid: return browserTopPaneHeightGrid
+        case .list: return browserTopPaneHeightList
+        }
+    }
+
     static func browsingDefaults() -> LayoutParams {
         LayoutParams(
             sidebarWidth: defaultSidebarWidth,
@@ -47,6 +59,8 @@ struct LayoutParams: Equatable {
             detailWidthGrid: defaultDetailWidth,
             contentWidthList: defaultContentWidth,
             detailWidthList: defaultDetailWidth,
+            browserTopPaneHeightGrid: defaultBrowserTopPaneHeight,
+            browserTopPaneHeightList: defaultBrowserTopPaneHeight,
             detailVideoHeight: defaultDetailVideoHeight,
             sidebarExpanded: defaultSidebarExpanded,
             columnCustomizationData: nil,
@@ -62,6 +76,8 @@ struct LayoutParams: Equatable {
             detailWidthGrid: playback.detailWidthGrid,
             contentWidthList: playback.contentWidthList,
             detailWidthList: playback.detailWidthList,
+            browserTopPaneHeightGrid: playback.browserTopPaneHeightGrid,
+            browserTopPaneHeightList: playback.browserTopPaneHeightList,
             detailVideoHeight: playback.detailVideoHeight,
             sidebarExpanded: playback.sidebarExpanded,
             columnCustomizationData: playback.columnCustomizationData,
@@ -83,6 +99,8 @@ struct LayoutParams: Equatable {
         copy.detailWidthGrid = clamp(detailWidthGrid, 100, 6000, Self.defaultDetailWidth)
         copy.contentWidthList = clamp(contentWidthList, 80, 6000, Self.defaultContentWidth)
         copy.detailWidthList = clamp(detailWidthList, 100, 6000, Self.defaultDetailWidth)
+        copy.browserTopPaneHeightGrid = clamp(browserTopPaneHeightGrid, 100, 8000, Self.defaultBrowserTopPaneHeight)
+        copy.browserTopPaneHeightList = clamp(browserTopPaneHeightList, 100, 8000, Self.defaultBrowserTopPaneHeight)
         copy.detailVideoHeight = clamp(detailVideoHeight, 100, 2000, Self.defaultDetailVideoHeight)
         return copy
     }
@@ -95,6 +113,8 @@ extension LayoutParams: Codable {
         case detailWidthGrid = "detailWidth"
         case contentWidthList
         case detailWidthList
+        case browserTopPaneHeightGrid
+        case browserTopPaneHeightList
         case detailVideoHeight
         case sidebarExpanded
         case columnCustomizationData
@@ -111,6 +131,10 @@ extension LayoutParams: Codable {
         let listD = try c.decodeIfPresent(Double.self, forKey: .detailWidthList)
         contentWidthList = listC ?? contentWidthGrid
         detailWidthList = listD ?? detailWidthGrid
+        let topG = try c.decodeIfPresent(Double.self, forKey: .browserTopPaneHeightGrid)
+        let topL = try c.decodeIfPresent(Double.self, forKey: .browserTopPaneHeightList)
+        browserTopPaneHeightGrid = topG ?? Self.defaultBrowserTopPaneHeight
+        browserTopPaneHeightList = topL ?? Self.defaultBrowserTopPaneHeight
         detailVideoHeight = try c.decode(Double.self, forKey: .detailVideoHeight)
         sidebarExpanded = try c.decode([String: Bool].self, forKey: .sidebarExpanded)
         columnCustomizationData = try c.decodeIfPresent(Data.self, forKey: .columnCustomizationData)
@@ -125,6 +149,8 @@ extension LayoutParams: Codable {
         try c.encode(detailWidthGrid, forKey: .detailWidthGrid)
         try c.encode(contentWidthList, forKey: .contentWidthList)
         try c.encode(detailWidthList, forKey: .detailWidthList)
+        try c.encode(browserTopPaneHeightGrid, forKey: .browserTopPaneHeightGrid)
+        try c.encode(browserTopPaneHeightList, forKey: .browserTopPaneHeightList)
         try c.encode(detailVideoHeight, forKey: .detailVideoHeight)
         try c.encode(sidebarExpanded, forKey: .sidebarExpanded)
         try c.encodeIfPresent(columnCustomizationData, forKey: .columnCustomizationData)

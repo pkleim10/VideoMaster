@@ -1,7 +1,9 @@
 import AppKit
 import SwiftUI
 
-struct SidebarView: View {
+/// Four filter columns (Library, Collections, Rating, Tags) below the list/grid, side by side.
+/// Replaces the former left `SidebarView` while preserving the same `LibraryViewModel` bindings and behavior.
+struct BottomFilterColumnsView: View {
     @Bindable var viewModel: LibraryViewModel
     @Environment(\.colorScheme) private var colorScheme
 
@@ -15,115 +17,21 @@ struct SidebarView: View {
     private static let rowHeight: CGFloat = 24
 
     var body: some View {
-        List(selection: $viewModel.sidebarFilter) {
-            sectionHeader("LIBRARY", isExpanded: $viewModel.isLibraryExpanded)
-                .selectionDisabled()
-                .listRowSeparator(.hidden)
-            if viewModel.isLibraryExpanded {
-                sidebarRow("All Videos", icon: "film.stack", count: viewModel.libraryCounts.all)
-                    .tag(SidebarFilter.all)
-                if viewModel.showRecentlyAdded {
-                    sidebarRow("Recently Added", icon: "clock", count: viewModel.libraryCounts.recentlyAdded)
-                        .tag(SidebarFilter.recentlyAdded)
-                }
-                if viewModel.showRecentlyPlayed {
-                    sidebarRow("Recently Played", icon: "play.circle", count: viewModel.libraryCounts.recentlyPlayed)
-                        .tag(SidebarFilter.recentlyPlayed)
-                }
-                if viewModel.showTopRated {
-                    sidebarRow("Top Rated", icon: "star.fill", count: viewModel.libraryCounts.topRated)
-                        .tag(SidebarFilter.topRated)
-                }
-                if viewModel.showDuplicates {
-                    sidebarRow("Duplicates", icon: "doc.on.doc", count: viewModel.libraryCounts.duplicates)
-                        .tag(SidebarFilter.duplicates)
-                }
-                if viewModel.showCorrupt {
-                    sidebarRow("Corrupt", icon: "exclamationmark.triangle", count: viewModel.libraryCounts.corrupt)
-                        .tag(SidebarFilter.corrupt)
-                }
-                if viewModel.showMissing {
-                    sidebarRow("Missing", icon: "questionmark.circle", count: viewModel.libraryCounts.missing, unscanned: !viewModel.missingCountScanned)
-                        .tag(SidebarFilter.missing)
-                }
-            }
-
-            sectionHeader("COLLECTIONS", isExpanded: $viewModel.isCollectionsExpanded)
-                .padding(.top, 12)
-                .selectionDisabled()
-                .listRowSeparator(.hidden)
-            if viewModel.isCollectionsExpanded {
-                if viewModel.collections.isEmpty {
-                    Text("No collections")
-                        .foregroundStyle(.tertiary)
-                        .font(.caption)
-                } else if viewModel.collections.count <= Self.maxVisibleItems {
-                    ForEach(viewModel.collections, id: \.listId) { collection in
-                        collectionRow(collection)
-                            .tag(SidebarFilter.collection(collection))
-                            .contextMenu {
-                                Button("Edit Collection\u{2026}") {
-                                    editingCollection = collection
-                                }
-                                Divider()
-                                Button("Delete Collection", role: .destructive) {
-                                    Task { await viewModel.deleteCollection(collection) }
-                                }
-                            }
-                    }
-                } else {
-                    scrollableCollections
-                        .selectionDisabled()
-                }
-
-                Button(action: { showNewCollectionSheet = true }) {
-                    Label("New Collection", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-            }
-
-            sectionHeader("RATING", isExpanded: $viewModel.isRatingExpanded)
-                .padding(.top, 12)
-                .selectionDisabled()
-                .listRowSeparator(.hidden)
-            if viewModel.isRatingExpanded {
-                ForEach((1...5).reversed(), id: \.self) { stars in
-                    ratingRow(stars: stars, count: viewModel.libraryCounts.byRating[stars] ?? 0)
-                        .tag(SidebarFilter.rating(stars))
-                }
-            }
-
-            tagsSectionHeader
-                .padding(.top, 12)
-                .selectionDisabled()
-                .listRowSeparator(.hidden)
-            if viewModel.isTagsExpanded {
-                if viewModel.tags.isEmpty {
-                    Text("No tags yet")
-                        .foregroundStyle(.tertiary)
-                        .font(.caption)
-                } else {
-                    ForEach(viewModel.tags, id: \.listId) { tag in
-                        tagRow(tag)
-                            .contextMenu { tagContextMenu(tag) }
-                    }
-                }
-
-                Button(action: {
-                    newTagName = ""
-                    showNewTag = true
-                }) {
-                    Label("New Tag", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-            }
+        HStack(alignment: .top, spacing: 0) {
+            libraryColumn
+                .frame(minWidth: 140, maxWidth: .infinity)
+            Divider()
+            collectionsColumn
+                .frame(minWidth: 140, maxWidth: .infinity)
+            Divider()
+            ratingColumn
+                .frame(minWidth: 120, maxWidth: .infinity)
+            Divider()
+            tagsColumn
+                .frame(minWidth: 160, maxWidth: .infinity)
         }
-        .listStyle(.sidebar)
-        .frame(minWidth: 180)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .controlBackgroundColor))
         .sheet(isPresented: $showNewCollectionSheet) {
             CollectionEditorView(
                 dbPool: viewModel.dbPool,
@@ -169,6 +77,148 @@ struct SidebarView: View {
         }
     }
 
+    // MARK: - Columns
+
+    private var libraryColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("LIBRARY", isExpanded: $viewModel.isLibraryExpanded)
+            if viewModel.isLibraryExpanded {
+                List(selection: $viewModel.sidebarFilter) {
+                    sidebarRow("All Videos", icon: "film.stack", count: viewModel.libraryCounts.all)
+                        .tag(SidebarFilter.all)
+                    if viewModel.showRecentlyAdded {
+                        sidebarRow("Recently Added", icon: "clock", count: viewModel.libraryCounts.recentlyAdded)
+                            .tag(SidebarFilter.recentlyAdded)
+                    }
+                    if viewModel.showRecentlyPlayed {
+                        sidebarRow("Recently Played", icon: "play.circle", count: viewModel.libraryCounts.recentlyPlayed)
+                            .tag(SidebarFilter.recentlyPlayed)
+                    }
+                    if viewModel.showTopRated {
+                        sidebarRow("Top Rated", icon: "star.fill", count: viewModel.libraryCounts.topRated)
+                            .tag(SidebarFilter.topRated)
+                    }
+                    if viewModel.showDuplicates {
+                        sidebarRow("Duplicates", icon: "doc.on.doc", count: viewModel.libraryCounts.duplicates)
+                            .tag(SidebarFilter.duplicates)
+                    }
+                    if viewModel.showCorrupt {
+                        sidebarRow("Corrupt", icon: "exclamationmark.triangle", count: viewModel.libraryCounts.corrupt)
+                            .tag(SidebarFilter.corrupt)
+                    }
+                    if viewModel.showMissing {
+                        sidebarRow("Missing", icon: "questionmark.circle", count: viewModel.libraryCounts.missing, unscanned: !viewModel.missingCountScanned)
+                            .tag(SidebarFilter.missing)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 120)
+            }
+        }
+        .padding(8)
+    }
+
+    private var collectionsColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("COLLECTIONS", isExpanded: $viewModel.isCollectionsExpanded)
+            if viewModel.isCollectionsExpanded {
+                if viewModel.collections.isEmpty {
+                    Text("No collections")
+                        .foregroundStyle(.tertiary)
+                        .font(.caption)
+                        .padding(.vertical, 4)
+                } else if viewModel.collections.count <= Self.maxVisibleItems {
+                    List(selection: $viewModel.sidebarFilter) {
+                        ForEach(viewModel.collections, id: \.listId) { collection in
+                            collectionRow(collection)
+                                .tag(SidebarFilter.collection(collection))
+                                .contextMenu {
+                                    Button("Edit Collection\u{2026}") {
+                                        editingCollection = collection
+                                    }
+                                    Divider()
+                                    Button("Delete Collection", role: .destructive) {
+                                        Task { await viewModel.deleteCollection(collection) }
+                                    }
+                                }
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 80)
+                } else {
+                    scrollableCollections
+                }
+
+                Button(action: { showNewCollectionSheet = true }) {
+                    Label("New Collection", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .font(.caption)
+                .padding(.top, 4)
+            }
+        }
+        .padding(8)
+    }
+
+    private var ratingColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("RATING", isExpanded: $viewModel.isRatingExpanded)
+            if viewModel.isRatingExpanded {
+                List(selection: $viewModel.sidebarFilter) {
+                    ForEach((1...5).reversed(), id: \.self) { stars in
+                        ratingRow(stars: stars, count: viewModel.libraryCounts.byRating[stars] ?? 0)
+                            .tag(SidebarFilter.rating(stars))
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 120)
+            }
+        }
+        .padding(8)
+    }
+
+    private var tagsColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            tagsSectionHeader
+            if viewModel.isTagsExpanded {
+                if viewModel.tags.isEmpty {
+                    Text("No tags yet")
+                        .foregroundStyle(.tertiary)
+                        .font(.caption)
+                        .padding(.vertical, 4)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(viewModel.tags, id: \.listId) { tag in
+                                tagRow(tag)
+                                    .contextMenu { tagContextMenu(tag) }
+                            }
+                        }
+                    }
+                    .frame(minHeight: 80)
+                }
+
+                Button(action: {
+                    newTagName = ""
+                    showNewTag = true
+                }) {
+                    Label("New Tag", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .font(.caption)
+                .padding(.top, 4)
+            }
+        }
+        .padding(8)
+    }
+
+    // MARK: - Shared (from former SidebarView)
+
     private var scrollableCollections: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -210,7 +260,6 @@ struct SidebarView: View {
             }
         }
         .frame(maxHeight: Self.rowHeight * CGFloat(Self.maxVisibleItems))
-        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
     }
 
     private var tagsSectionHeader: some View {
@@ -278,6 +327,7 @@ struct SidebarView: View {
             }
         }
         .buttonStyle(.plain)
+        .padding(.bottom, 4)
     }
 
     private func tagRow(_ tag: Tag) -> some View {
@@ -321,12 +371,13 @@ struct SidebarView: View {
                 .background(.quaternary, in: Capsule())
                 .foregroundStyle(.secondary)
         }
-        .listRowBackground(
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .background(
             isSelected
                 ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.3))
                 : nil
         )
-        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         .contentShape(Rectangle())
         .onTapGesture {
             handleTagTap(tag)
@@ -334,7 +385,6 @@ struct SidebarView: View {
         .onTapGesture(count: 2) {
             startTagRename(tag)
         }
-        .selectionDisabled()
     }
 
     private func startTagRename(_ tag: Tag) {
