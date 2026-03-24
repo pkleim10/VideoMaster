@@ -7,6 +7,10 @@ struct VideoDetailView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
     @State private var tags: [Tag] = []
+    /// Stored values for custom metadata fields (UUID → string); empty string is valid.
+    @State private var customFieldValues: [UUID: String] = [:]
+    /// Fields where the current selection has differing values (“Various”).
+    @State private var customFieldVarious: Set<UUID> = []
     @State private var newTagName: String = ""
     @State private var isCreatingTag = false
     @FocusState private var isTagFieldFocused: Bool
@@ -140,6 +144,15 @@ struct VideoDetailView: View {
         }
         .onChange(of: viewModel.autoAdjustVideoPane) { _, _ in
             scheduleAutoAdjustVideoPane()
+        }
+        .onChange(of: viewModel.selectedVideoIds) { _, _ in
+            Task { @MainActor in
+                tags = viewModel.tagsForVideos(selectedIds)
+                await reloadCustomMetadata()
+            }
+        }
+        .onChange(of: viewModel.customMetadataFieldDefinitions) { _, _ in
+            Task { await reloadCustomMetadata() }
         }
     }
 
@@ -406,7 +419,7 @@ struct VideoDetailView: View {
                         }
                         return "--"
                     }())
-                    MetadataRow(label: "Play Count", value: {
+                    MetadataRow(label: "Plays", value: {
                         if let pc = commonValue(\.playCount) { return "\(pc)" }
                         return "--"
                     }())
@@ -443,8 +456,226 @@ struct VideoDetailView: View {
                             value: lastPlayed.formatted(date: .abbreviated, time: .shortened)
                         )
                     }
-                    MetadataRow(label: "Play Count", value: "\(video.playCount)")
+                    MetadataRow(label: "Plays", value: "\(video.playCount)")
                 }
+            }
+
+            if !sortedCustomDefinitionFields.isEmpty {
+                Divider()
+                customMetadataFieldsSection
+            }
+        }
+    }
+
+    private var sortedCustomDefinitionFields: [CustomMetadataFieldDefinition] {
+        viewModel.customMetadataFieldDefinitions.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private var customMetadataFieldsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Custom")
+                .font(.headline)
+            ForEach(sortedCustomDefinitionFields) { field in
+                customMetadataFieldEditor(for: field)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func customMetadataFieldEditor(for field: CustomMetadataFieldDefinition) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(field.name)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            switch field.valueType {
+            case .string:
+                customStringField(for: field)
+            case .text:
+                customTextEditorField(for: field)
+            case .number:
+                customNumberField(for: field)
+            case .date:
+                customDateField(for: field, includeTime: false)
+            case .dateTime:
+                customDateField(for: field, includeTime: true)
+            }
+        }
+    }
+
+    private func customStringField(for field: CustomMetadataFieldDefinition) -> some View {
+        Group {
+            if customFieldVarious.contains(field.id) {
+                TextField("", text: customBinding(for: field), prompt: Text("Various").foregroundStyle(.tertiary))
+                    .textFieldStyle(.roundedBorder)
+            } else {
+                TextField("", text: customBinding(for: field))
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private func customTextEditorField(for field: CustomMetadataFieldDefinition) -> some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: customBinding(for: field))
+                .font(.body)
+                .frame(minHeight: 56, maxHeight: 120)
+                .scrollContentBackground(.hidden)
+                .padding(4)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
+                }
+            if customFieldVarious.contains(field.id), (customFieldValues[field.id] ?? "").isEmpty {
+                Text("Various")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 12)
+                    .padding(.leading, 10)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func customNumberField(for field: CustomMetadataFieldDefinition) -> some View {
+        Group {
+            if customFieldVarious.contains(field.id) {
+                TextField("", text: customNumberBinding(for: field), prompt: Text("Various").foregroundStyle(.tertiary))
+                    .textFieldStyle(.roundedBorder)
+            } else {
+                TextField("", text: customNumberBinding(for: field))
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private func customDateField(for field: CustomMetadataFieldDefinition, includeTime: Bool) -> some View {
+        Group {
+            if customFieldVarious.contains(field.id) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Various")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(includeTime ? "Set date & time…" : "Set date…") {
+                        let now = Date()
+                        let encoded = CustomMetadataDetailCodec.encodeDate(now, as: field.valueType)
+                        customFieldValues[field.id] = encoded
+                        customFieldVarious.remove(field.id)
+                        Task {
+                            await viewModel.persistCustomMetadata(
+                                fieldId: field.id,
+                                value: encoded,
+                                forVideoPaths: selectedIds
+                            )
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } else if includeTime {
+                DatePicker(
+                    "",
+                    selection: customDateBinding(for: field),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .labelsHidden()
+            } else {
+                DatePicker(
+                    "",
+                    selection: customDateBinding(for: field),
+                    displayedComponents: .date
+                )
+                .labelsHidden()
+            }
+        }
+    }
+
+    private func customBinding(for field: CustomMetadataFieldDefinition) -> Binding<String> {
+        Binding(
+            get: { customFieldValues[field.id] ?? "" },
+            set: { new in
+                customFieldValues[field.id] = new
+                customFieldVarious.remove(field.id)
+                Task {
+                    await viewModel.persistCustomMetadata(
+                        fieldId: field.id,
+                        value: new,
+                        forVideoPaths: selectedIds
+                    )
+                }
+            }
+        )
+    }
+
+    private func customNumberBinding(for field: CustomMetadataFieldDefinition) -> Binding<String> {
+        Binding(
+            get: { customFieldValues[field.id] ?? "" },
+            set: { new in
+                customFieldValues[field.id] = new
+                customFieldVarious.remove(field.id)
+                let trimmed = new.trimmingCharacters(in: .whitespaces)
+                guard trimmed.isEmpty || Double(trimmed) != nil else { return }
+                Task {
+                    await viewModel.persistCustomMetadata(
+                        fieldId: field.id,
+                        value: trimmed,
+                        forVideoPaths: selectedIds
+                    )
+                }
+            }
+        )
+    }
+
+    private func customDateBinding(for field: CustomMetadataFieldDefinition) -> Binding<Date> {
+        Binding(
+            get: {
+                let s = customFieldValues[field.id] ?? ""
+                return CustomMetadataDetailCodec.decodeDateLike(s, as: field.valueType) ?? Date()
+            },
+            set: { newDate in
+                let s = CustomMetadataDetailCodec.encodeDate(newDate, as: field.valueType)
+                customFieldValues[field.id] = s
+                customFieldVarious.remove(field.id)
+                Task {
+                    await viewModel.persistCustomMetadata(
+                        fieldId: field.id,
+                        value: s,
+                        forVideoPaths: selectedIds
+                    )
+                }
+            }
+        )
+    }
+
+    /// Tags in alphabetical order for the tag picker (inline flow).
+    private var sortedAlphaTags: [Tag] {
+        viewModel.tags.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    @ViewBuilder
+    private func tagToggleChip(for tag: Tag) -> some View {
+        TagToggleChip(
+            tag: tag,
+            isActive: tags.contains(where: { $0.id == tag.id })
+        ) { isAdding in
+            if isAdding {
+                if !tags.contains(where: { $0.id == tag.id }) {
+                    tags.append(tag)
+                }
+            } else {
+                tags.removeAll { $0.id == tag.id }
+            }
+            Task {
+                let selected = selectedIds
+                if isAdding {
+                    await viewModel.addTag(tag.name, toVideos: selected)
+                } else {
+                    await viewModel.removeTag(tag, fromVideos: selected)
+                }
+                tags = viewModel.tagsForVideos(selected)
             }
         }
     }
@@ -475,28 +706,8 @@ struct VideoDetailView: View {
                         .foregroundStyle(.tertiary)
                 } else {
                     FlowLayout(spacing: 6) {
-                        ForEach(viewModel.tags) { tag in
-                            TagToggleChip(
-                                tag: tag,
-                                isActive: tags.contains(where: { $0.id == tag.id })
-                            ) { isAdding in
-                                if isAdding {
-                                    if !tags.contains(where: { $0.id == tag.id }) {
-                                        tags.append(tag)
-                                    }
-                                } else {
-                                    tags.removeAll { $0.id == tag.id }
-                                }
-                                Task {
-                                    let selected = selectedIds
-                                    if isAdding {
-                                        await viewModel.addTag(tag.name, toVideos: selected)
-                                    } else {
-                                        await viewModel.removeTag(tag, fromVideos: selected)
-                                    }
-                                    tags = viewModel.tagsForVideos(selected)
-                                }
-                            }
+                        ForEach(sortedAlphaTags) { tag in
+                            tagToggleChip(for: tag)
                         }
                     }
                 }
@@ -577,6 +788,7 @@ struct VideoDetailView: View {
 
         // Metadata / detail pane first — do not wait for filmstrip load or generation.
         tags = viewModel.tagsForVideos(selectedIds)
+        await reloadCustomMetadata()
         if viewModel.showThumbnailInDetail {
             scheduleDetailPreviewLoad(for: resolvedVideo)
         }
@@ -814,6 +1026,77 @@ struct VideoDetailView: View {
         }
     }
 
+    private func reloadCustomMetadata() async {
+        let merged = await viewModel.mergedCustomMetadata(forVideoPaths: Array(selectedIds))
+        let validIds = Set(sortedCustomDefinitionFields.map(\.id))
+        customFieldValues = customFieldValues.filter { validIds.contains($0.key) }
+        customFieldVarious = customFieldVarious.filter { validIds.contains($0) }
+        for def in sortedCustomDefinitionFields {
+            if let common = merged[def.id] {
+                customFieldVarious.remove(def.id)
+                customFieldValues[def.id] = common
+            } else {
+                customFieldVarious.insert(def.id)
+                customFieldValues[def.id] = ""
+            }
+        }
+    }
+
+}
+
+/// Encode/decode custom date fields in the detail pane (stored as strings in SQLite).
+private enum CustomMetadataDetailCodec {
+    private static let dateOnlyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let iso8601DateTime: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let iso8601DateTimeNoFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func encodeDate(_ date: Date, as type: CustomMetadataValueType) -> String {
+        switch type {
+        case .date:
+            return dateOnlyFormatter.string(from: date)
+        case .dateTime:
+            return iso8601DateTime.string(from: date)
+        default:
+            return ""
+        }
+    }
+
+    static func decodeDateLike(_ s: String, as type: CustomMetadataValueType) -> Date? {
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        switch type {
+        case .date:
+            if let d = dateOnlyFormatter.date(from: trimmed) { return d }
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withFullDate]
+            return iso.date(from: trimmed)
+        case .dateTime:
+            if let d = iso8601DateTime.date(from: trimmed) { return d }
+            if let d = iso8601DateTimeNoFraction.date(from: trimmed) { return d }
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime]
+            return iso.date(from: trimmed)
+        default:
+            return nil
+        }
+    }
 }
 
 struct MetadataRow: View {

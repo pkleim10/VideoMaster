@@ -95,6 +95,21 @@ enum DatabaseMigration {
             }
         }
 
+        migrator.registerMigration("v5_video_custom_metadata") { db in
+            try db.create(table: "video_custom_metadata") { t in
+                t.column("videoId", .integer).notNull()
+                    .references("video", onDelete: .cascade)
+                t.column("fieldId", .text).notNull()
+                t.column("value", .text).notNull()
+                t.primaryKey(["videoId", "fieldId"])
+            }
+            try db.create(
+                index: "idx_video_custom_metadata_videoId",
+                on: "video_custom_metadata",
+                columns: ["videoId"]
+            )
+        }
+
         try migrator.migrate(pool)
     }
 }

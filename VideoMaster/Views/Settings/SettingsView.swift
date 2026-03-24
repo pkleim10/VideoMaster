@@ -31,6 +31,11 @@ struct SettingsView: View {
                     .tabItem {
                         Label("File Ext", systemImage: "doc.badge.gearshape")
                     }
+
+                CustomMetadataSettingsView(viewModel: vm)
+                    .tabItem {
+                        Label("Custom Metadata", systemImage: "square.grid.3x3.square.badge.ellipsis")
+                    }
             }
         }
         .frame(minWidth: 500, minHeight: 350)
@@ -94,9 +99,11 @@ struct LibrarySettingsView: View {
             }
 
             Section {
-                Toggle("Collapse filters when moving up from strip", isOn: $viewModel.collapseFilterStripWhenUnhovered)
+                ListColumnsSettingsContent(viewModel: viewModel)
+            } header: {
+                Text("List view columns")
             } footer: {
-                Text("When enabled, the filter strip shrinks to a thin bar only after you leave it by moving up into the list or grid. Leaving sideways or downward keeps the strip expanded. Hovering expands it again; your saved splitter height is not changed by collapsing.")
+                Text("Choose which metadata columns appear in list view. Name is always shown. Up to 16 custom columns can be shown at once (alphabetically). You can still reorder and resize visible columns using the table header.")
             }
         }
         .formStyle(.grouped)

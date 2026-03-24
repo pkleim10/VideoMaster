@@ -32,6 +32,11 @@ struct BottomFilterColumnsView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .controlBackgroundColor))
+        .contextMenu {
+            Button(viewModel.showFilterStrip ? "Collapse Filter Strip" : "Expand Filter Strip") {
+                viewModel.showFilterStrip.toggle()
+            }
+        }
         .sheet(isPresented: $showNewCollectionSheet) {
             CollectionEditorView(
                 dbPool: viewModel.dbPool,
@@ -307,11 +312,11 @@ struct BottomFilterColumnsView: View {
             }
         }
         .contextMenu {
-            Button("Remove Filter") {
-                viewModel.clearTagFilters()
+            Button("Clear Filters") {
+                viewModel.clearFilters()
             }
-            .disabled(viewModel.selectedTagIds.isEmpty)
-            .keyboardShortcut("t", modifiers: [.command, .option])
+            .disabled(viewModel.selectedTagIds.isEmpty && !viewModel.isRatingFilterActive)
+            .keyboardShortcut("c", modifiers: [.command, .option])
         }
     }
 

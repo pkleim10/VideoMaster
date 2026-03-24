@@ -15,6 +15,7 @@ final class LibraryViewModel {
                 recomputeFilteredVideos()
             }
             scheduleCollectionCountRefresh()
+            scheduleListCustomMetadataRefresh()
         }
     }
     var tags: [Tag] = []
@@ -169,6 +170,7 @@ final class LibraryViewModel {
         self.thumbnailService = thumbnailService
         self.scanner = LibraryScanner(dbPool: dbPool, thumbnailService: thumbnailService)
         loadPreferences()
+        Task { await refreshListCustomMetadataCacheIfNeeded() }
     }
 
     // MARK: - Preferences Persistence
@@ -200,9 +202,11 @@ final class LibraryViewModel {
     private static let showDuplicatesKey = "VideoMaster.showDuplicates"
     private static let showCorruptKey = "VideoMaster.showCorrupt"
     private static let showMissingKey = "VideoMaster.showMissing"
-    private static let collapseFilterStripWhenUnhoveredKey = "VideoMaster.collapseFilterStripWhenUnhovered"
+    private static let showFilterStripKey = "VideoMaster.showFilterStrip"
+    private static let customMetadataFieldDefinitionsKey = "VideoMaster.customMetadataFieldDefinitions"
     private static let missingCountScannedKey = "VideoMaster.missingCountScanned"
     private static let missingVideoIdsKey = "VideoMaster.missingVideoIds"
+    private static let listColumnPreferencesKey = "VideoMaster.listColumnPreferences"
 
     var excludeCorrupt: Bool = false {
         didSet {
@@ -344,11 +348,164 @@ final class LibraryViewModel {
         }
     }
 
-    /// When true, the bottom filter strip shrinks to a minimal bar unless the pointer is over it; saved splitter height is unchanged.
-    var collapseFilterStripWhenUnhovered: Bool = false {
+    /// When false, the bottom filter strip collapses to zero height (splitter remains); saved splitter height is unchanged. Expand/collapse from the View menu (⌘⌥B), context menu, or the list/grid or filter strip.
+    var showFilterStrip: Bool = true {
         didSet {
-            UserDefaults.standard.set(collapseFilterStripWhenUnhovered, forKey: Self.collapseFilterStripWhenUnhoveredKey)
+            UserDefaults.standard.set(showFilterStrip, forKey: Self.showFilterStripKey)
         }
+    }
+
+    /// Schema for per-video custom metadata (Settings UI only until values are wired in the library UI).
+    var customMetadataFieldDefinitions: [CustomMetadataFieldDefinition] = [] {
+        didSet {
+            saveCustomMetadataFieldDefinitions()
+        }
+    }
+
+    /// Which standard/custom columns appear in list view (Name is always shown).
+    var listColumnPreferences: ListColumnPreferences = .default {
+        didSet {
+            guard !_loadingListColumnPreferences else { return }
+            saveListColumnPreferences()
+            scheduleListCustomMetadataRefresh()
+        }
+    }
+
+    /// Cached custom metadata for list cells, keyed by `Video.databaseId` then field UUID.
+    private(set) var listCustomMetadataByVideoId: [Int64: [UUID: String]] = [:]
+
+    private var _loadingListColumnPreferences = false
+    private var listCustomMetadataRefreshTask: Task<Void, Never>?
+
+    func isStandardListColumnVisible(_ id: String) -> Bool {
+        listColumnPreferences.visibleStandardColumnIDs.contains(id)
+    }
+
+    func setStandardListColumnVisible(_ id: String, visible: Bool) {
+        guard ListColumnPreferences.optionalStandardColumnIDs.contains(id) else { return }
+        var p = listColumnPreferences
+        if visible {
+            p.visibleStandardColumnIDs.insert(id)
+        } else {
+            p.visibleStandardColumnIDs.remove(id)
+        }
+        listColumnPreferences = p
+    }
+
+    func setCustomListFieldVisible(fieldId: UUID, visible: Bool) {
+        var p = listColumnPreferences
+        if visible {
+            p.visibleCustomFieldIDs.insert(fieldId)
+        } else {
+            p.visibleCustomFieldIDs.remove(fieldId)
+        }
+        listColumnPreferences = p
+    }
+
+    func isCustomListFieldVisible(_ fieldId: UUID) -> Bool {
+        listColumnPreferences.visibleCustomFieldIDs.contains(fieldId)
+    }
+
+    /// Custom columns shown in list view (alphabetical; at most 16 — SwiftUI `Table` column builder limit).
+    var visibleCustomFieldsForList: [CustomMetadataFieldDefinition] {
+        let visible = listColumnPreferences.visibleCustomFieldIDs
+        return Array(
+            customMetadataFieldDefinitions
+                .filter { visible.contains($0.id) && $0.valueType != .text }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                .prefix(16)
+        )
+    }
+
+    func listCustomFieldDisplay(for video: Video, field: CustomMetadataFieldDefinition) -> String {
+        guard let vid = video.databaseId,
+              let raw = listCustomMetadataByVideoId[vid]?[field.id]
+        else {
+            return "—"
+        }
+        return ListCustomMetadataCellFormatter.display(raw: raw, valueType: field.valueType)
+    }
+
+    /// Bumps `Table` identity when visible column set changes.
+    var listColumnConfigurationSignature: String {
+        let s = listColumnPreferences.visibleStandardColumnIDs.sorted().joined(separator: ",")
+        let c = listColumnPreferences.visibleCustomFieldIDs.map(\.uuidString).sorted().joined(separator: ",")
+        return "\(s)|\(c)"
+    }
+
+    private func saveListColumnPreferences() {
+        guard let data = try? JSONEncoder().encode(listColumnPreferences) else { return }
+        UserDefaults.standard.set(data, forKey: Self.listColumnPreferencesKey)
+    }
+
+    private func scheduleListCustomMetadataRefresh() {
+        listCustomMetadataRefreshTask?.cancel()
+        listCustomMetadataRefreshTask = Task { @MainActor in
+            await refreshListCustomMetadataCacheIfNeeded()
+        }
+    }
+
+    private func refreshListCustomMetadataCacheIfNeeded() async {
+        guard !listColumnPreferences.visibleCustomFieldIDs.isEmpty else {
+            listCustomMetadataByVideoId = [:]
+            return
+        }
+        let ids = videos.compactMap(\.databaseId)
+        guard !ids.isEmpty else {
+            listCustomMetadataByVideoId = [:]
+            return
+        }
+        do {
+            let raw = try await videoRepo.fetchCustomMetadata(forVideoIds: ids)
+            var result: [Int64: [UUID: String]] = [:]
+            for (vid, fields) in raw {
+                var m: [UUID: String] = [:]
+                for (k, v) in fields {
+                    if let u = UUID(uuidString: k) { m[u] = v }
+                }
+                result[vid] = m
+            }
+            listCustomMetadataByVideoId = result
+        } catch {
+            listCustomMetadataByVideoId = [:]
+        }
+    }
+
+    private func mergeListCustomMetadataCache(videoId: Int64, fieldId: UUID, value: String) {
+        guard listColumnPreferences.visibleCustomFieldIDs.contains(fieldId) else { return }
+        var inner = listCustomMetadataByVideoId[videoId] ?? [:]
+        inner[fieldId] = value
+        listCustomMetadataByVideoId[videoId] = inner
+    }
+
+    func addCustomMetadataField() {
+        let n = customMetadataFieldDefinitions.count + 1
+        customMetadataFieldDefinitions.append(
+            CustomMetadataFieldDefinition(name: "Field \(n)", valueType: .string)
+        )
+    }
+
+    func removeCustomMetadataFields(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        customMetadataFieldDefinitions.removeAll { ids.contains($0.id) }
+        var p = listColumnPreferences
+        p.visibleCustomFieldIDs.subtract(ids)
+        listColumnPreferences = p
+    }
+
+    func updateCustomMetadataFieldName(id: UUID, name: String) {
+        guard let i = customMetadataFieldDefinitions.firstIndex(where: { $0.id == id }) else { return }
+        customMetadataFieldDefinitions[i].name = name
+    }
+
+    func updateCustomMetadataFieldType(id: UUID, valueType: CustomMetadataValueType) {
+        guard let i = customMetadataFieldDefinitions.firstIndex(where: { $0.id == id }) else { return }
+        customMetadataFieldDefinitions[i].valueType = valueType
+    }
+
+    private func saveCustomMetadataFieldDefinitions() {
+        guard let data = try? JSONEncoder().encode(customMetadataFieldDefinitions) else { return }
+        UserDefaults.standard.set(data, forKey: Self.customMetadataFieldDefinitionsKey)
     }
 
     // MARK: - Layout (browsing vs playback)
@@ -582,9 +739,26 @@ final class LibraryViewModel {
             defaults.removeObject(forKey: Self.legacyAutoAdjustVideoPanePaddingKey)
             defaults.set(autoAdjustVideoPane, forKey: Self.autoAdjustVideoPaneKey)
         }
-        if defaults.object(forKey: Self.collapseFilterStripWhenUnhoveredKey) != nil {
-            collapseFilterStripWhenUnhovered = defaults.bool(forKey: Self.collapseFilterStripWhenUnhoveredKey)
+        if defaults.object(forKey: Self.showFilterStripKey) != nil {
+            showFilterStrip = defaults.bool(forKey: Self.showFilterStripKey)
         }
+        if let data = defaults.data(forKey: Self.customMetadataFieldDefinitionsKey),
+           let decoded = try? JSONDecoder().decode([CustomMetadataFieldDefinition].self, from: data)
+        {
+            customMetadataFieldDefinitions = decoded
+        }
+
+        _loadingListColumnPreferences = true
+        if let data = defaults.data(forKey: Self.listColumnPreferencesKey),
+           let decoded = try? JSONDecoder().decode(ListColumnPreferences.self, from: data)
+        {
+            listColumnPreferences = decoded.sanitized(
+                knownCustomFieldIds: Set(customMetadataFieldDefinitions.map(\.id))
+            )
+        } else {
+            listColumnPreferences = .default
+        }
+        _loadingListColumnPreferences = false
 
         // Load layouts (with migration from legacy keys)
         if let data = defaults.data(forKey: Self.browsingLayoutKey),
@@ -1211,6 +1385,47 @@ final class LibraryViewModel {
         }
     }
 
+    /// Per-field merged string; `nil` means selected videos disagree (show “Various”).
+    func mergedCustomMetadata(forVideoPaths paths: [String]) async -> [UUID: String?] {
+        let defs = customMetadataFieldDefinitions
+        guard !defs.isEmpty else { return [:] }
+        let dbIds = paths.compactMap { path in
+            videos.first(where: { $0.filePath == path })?.databaseId
+        }
+        guard !dbIds.isEmpty else {
+            return Dictionary(uniqueKeysWithValues: defs.map { ($0.id, nil as String?) })
+        }
+
+        var perVideo: [[String: String]] = []
+        for dbId in dbIds {
+            let row = (try? await videoRepo.fetchCustomMetadata(forVideoId: dbId)) ?? [:]
+            perVideo.append(row)
+        }
+
+        var out: [UUID: String?] = [:]
+        for def in defs {
+            let key = def.id.uuidString
+            let vals = perVideo.map { $0[key] ?? "" }
+            if Set(vals).count == 1 {
+                out[def.id] = vals.first
+            } else {
+                out[def.id] = nil
+            }
+        }
+        return out
+    }
+
+    func persistCustomMetadata(fieldId: UUID, value: String, forVideoPaths paths: Set<String>) async {
+        let dbIds = paths.compactMap { path in
+            videos.first(where: { $0.filePath == path })?.databaseId
+        }
+        guard !dbIds.isEmpty else { return }
+        try? await videoRepo.upsertCustomMetadata(videoIds: dbIds, fieldId: fieldId, value: value)
+        for id in dbIds {
+            mergeListCustomMetadataCache(videoId: id, fieldId: fieldId, value: value)
+        }
+    }
+
     func renameVideo(_ video: Video, to newName: String) async -> String? {
         guard let dbId = video.databaseId else { return nil }
 
@@ -1433,6 +1648,25 @@ final class LibraryViewModel {
 
     func clearTagFilters() {
         selectedTagIds = []
+    }
+
+    /// True when the Library strip’s per-star rating filter is active (not Top Rated, etc.).
+    var isRatingFilterActive: Bool {
+        if case .rating = sidebarFilter { return true }
+        return false
+    }
+
+    /// Clears the per-star rating filter (Library strip → Rating). No-op if another sidebar filter is active.
+    func clearRatingFilter() {
+        if case .rating = sidebarFilter {
+            sidebarFilter = .all
+        }
+    }
+
+    /// Clears tag filters and the per-star rating filter (View menu **⌘⌥C**).
+    func clearFilters() {
+        clearTagFilters()
+        clearRatingFilter()
     }
 
     func deleteTag(_ tag: Tag) async {

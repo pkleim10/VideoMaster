@@ -79,6 +79,7 @@ Use the **segmented control** in the toolbar:
 
 - **Grid** — visual thumbnails; great for skimming.
 - **List** — sortable columns; great for names, dates, and batch selection. Changing sort (toolbar or column headers) clears multi-selection; with exactly one video selected, the grid or list scrolls to that item.
+- **List columns** — In **Settings → Library**, choose which standard metadata columns (duration, resolution, size, rating, date added, plays, created, last played) and which custom metadata fields appear. Name is always shown. **Multiline Text** custom fields are not available as list columns. In list mode, the toolbar **Columns** button opens the same options. Up to **16** custom fields can appear as columns at once (alphabetical order). You can still reorder and resize columns from the table header.
 
 Your choice is remembered.
 
@@ -132,7 +133,7 @@ Under **RATING**, pick **1–5 stars** to show only videos at that rating. In th
 
 ### Tags
 
-The sidebar lists your **tags**; click a tag to filter by it. Next to the **TAGS** header, the small **ALL** / **ANY** pill toggles whether videos must have **every** selected tag or **at least one**. The **×** button clears tag filters (same idea as **⌥⌘T** in the menu).
+The sidebar lists your **tags**; click a tag to filter by it. Next to the **TAGS** header, the small **ALL** / **ANY** pill toggles whether videos must have **every** selected tag or **at least one**. The **×** button clears tag filters (same idea as **Clear Filters** in the View menu, **⌥⌘C**, which clears tag filters and an active per-star rating filter together).
 
 In the **detail** pane, tags show as **chips**: click to add or remove tags for the selected video(s). Active tags are easy to spot.
 
@@ -176,10 +177,11 @@ Open **VideoMaster → Settings…** (standard macOS Settings window).
 | Tab | What you’ll find |
 |-----|-------------------|
 | **Application** | **Appearance:** **System** (follow macOS light/dark), **Light**, or **Dark** (locks the app to that style). |
-| **Library** | Exclude corrupt files from most filters, confirm before delete, which sidebar rows show (Recently Added, Duplicates, Missing, …) and their options. Optional **Collapse filters when moving up from strip** shrinks the bottom filter strip only after you leave it upward into the list or grid; leaving sideways or down keeps it expanded. Hover restores it (saved splitter height is unchanged). *(Requires an open library.)* |
+| **Library** | Exclude corrupt files from most filters, confirm before delete, which sidebar rows show (Recently Added, Duplicates, Missing, …) and their options. The bottom **filter strip** can be **expanded** or **collapsed** from the **View** menu (**⌘⌥F**), or via the context menu on the list/grid or the strip (saved splitter height is unchanged). When collapsed, the strip has **no height**; the **horizontal splitter** remains so you can drag it to reveal filters again. *(Requires an open library.)* |
 | **Video** | Default **filmstrip** grid (rows × columns), regenerate filmstrips, **Surprise Me!** auto-play, **maximum large preview thumbnail (long-edge)**, **auto adjust video pane** toggle (splitter fits preview to media). *(Requires an open library.)* |
 | **Data Sources** | List of watched folders, add/remove, **Show in Finder**. *(Requires an open library.)* |
 | **File Ext** | Which extensions count as video when scanning; add custom extensions or reset to defaults. *(Requires an open library.)* |
+| **Custom Metadata** | Define field **names** and **types** (String, Text, Number, Date, Date & Time) for future per-video values; list with **+** / **−**. *(Requires an open library.)* |
 
 ![Settings Library tab (placeholder)](images/placeholder.svg)  
 *Later: `settings-library.png`.*
@@ -205,8 +207,9 @@ When in doubt, **File** → **Open Library…** and pick your library file again
 | Shortcut | Action |
 |----------|--------|
 | **⇧⌘S** | Surprise Me! |
-| **⌥⌘T** | Clear tag filters |
-| **⌥⌘F** | Toggle **Thumbnail** / **Filmstrip** in the detail preview (same as the segmented control) |
+| **⌥⌘C** | **Clear Filters** — selected tag filters and an active per-star rating filter (View menu) |
+| **⌥⌘T** | Toggle **Thumbnail** / **Filmstrip** in the detail preview (same as the segmented control) |
+| **⌥⌘F** | Expand / collapse the bottom **filter strip** |
 | **⌘Delete** | Delete selected video(s) (confirmation if enabled) |
 | **⇧⌘R** | Remove selected from library |
 | **⇧⌘O** | Add Folder… |
@@ -230,7 +233,7 @@ Under **File** (exact labels may vary slightly by OS language):
 - **Save Copy…** — backup library file.  
 - **Close Library…** / **Delete This Library…** — close or delete the **database** (not your video files).
 
-Other commands live under **VideoMaster** (About, Settings, etc.) and the **View** / **Window** menus as macOS provides. **View** includes **Surprise Me!**, **Clear Tag Filters**, and **Toggle Thumbnail / Filmstrip** (⌥⌘F).
+Other commands live under **VideoMaster** (About, Settings, etc.) and the **View** / **Window** menus as macOS provides. **View** includes **Surprise Me!**, **Clear Filters** (⌥⌘C, when tag or per-star rating filters are active), **Toggle Thumbnail / Filmstrip** (⌥⌘T), and **Expand/Collapse Filter Strip** (⌥⌘F).
 
 ---
 

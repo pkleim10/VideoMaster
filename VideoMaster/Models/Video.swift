@@ -36,6 +36,10 @@ extension Video {
     var sortablePixelCount: Int { (width ?? 0) * (height ?? 0) }
     /// Vertical line count for resolution sort — matches how people describe “1080p”, etc.
     var sortableResolutionHeight: Int { height ?? 0 }
+    /// For list sort when `creationDate` is missing (sort before any real date).
+    var sortableCreationDate: TimeInterval { creationDate?.timeIntervalSinceReferenceDate ?? -1 }
+    /// For list sort when `lastPlayed` is missing.
+    var sortableLastPlayed: TimeInterval { lastPlayed?.timeIntervalSinceReferenceDate ?? -1 }
 
     var resolution: String? {
         guard let w = width, let h = height else { return nil }

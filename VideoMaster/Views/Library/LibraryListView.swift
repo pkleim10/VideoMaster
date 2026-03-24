@@ -105,107 +105,9 @@ struct LibraryListView: View {
             sortOrder: $viewModel.tableSortOrder,
             columnCustomization: $viewModel.columnCustomization
         ) {
-            TableColumn("Name", value: \.fileName) { video in
-                HStack(spacing: 8) {
-                    AsyncThumbnailView(
-                        filePath: video.filePath, thumbnailService: thumbnailService
-                    )
-                    .frame(width: 56, height: 36)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .onHover { hovering in
-                        thumbnailPopoverVideoId = hovering ? video.id : nil
-                    }
-                    .popover(
-                        isPresented: Binding(
-                            get: { thumbnailPopoverVideoId == video.id },
-                            set: { if !$0 { thumbnailPopoverVideoId = nil } }
-                        ),
-                        arrowEdge: .trailing
-                    ) {
-                        AsyncThumbnailView(
-                            filePath: video.filePath, thumbnailService: thumbnailService
-                        )
-                        .frame(width: 224, height: 144)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-
-                    if viewModel.renamingVideoId == video.id {
-                        TextField("", text: $viewModel.renameText)
-                            .textFieldStyle(.plain)
-                            .lineLimit(1)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(Color(nsColor: .textBackgroundColor))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(Color.accentColor, lineWidth: 2)
-                            )
-                            .focused($isRenameFocused)
-                            .onSubmit { commitRename(video) }
-                            .onExitCommand { cancelRename() }
-                            .onAppear {
-                                viewModel.isEditingText = true
-                                DispatchQueue.main.async {
-                                    isRenameFocused = true
-                                }
-                            }
-                            .onDisappear {
-                                viewModel.isEditingText = false
-                            }
-                    } else {
-                        Text(video.fileName)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .width(min: 200, ideal: 350)
-            .customizationID("name")
-
-            TableColumn("Duration", value: \.sortableDuration) { video in
-                Text(video.formattedDuration ?? "—")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 60, ideal: 80)
-            .customizationID("duration")
-
-            TableColumn("Resolution", value: \.sortableResolutionHeight) { video in
-                if let label = video.resolutionLabel {
-                    Text(label)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("—")
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .width(min: 60, ideal: 80)
-            .customizationID("resolution")
-
-            TableColumn("Size", value: \.fileSize) { video in
-                Text(video.formattedFileSize)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 60, ideal: 80)
-            .customizationID("size")
-
-            TableColumn("Rating", value: \.rating) { video in
-                RatingView(rating: video.rating, size: 10) { newRating in
-                    viewModel.applyRating(to: [video.id], rating: newRating)
-                    Task { await viewModel.persistRating(for: [video.id], rating: newRating) }
-                }
-            }
-            .width(min: 70, ideal: 90)
-            .customizationID("rating")
-
-            TableColumn("Date Added", value: \.dateAdded) { video in
-                Text(video.dateAdded, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 80, ideal: 100)
-            .customizationID("dateAdded")
+            listTableColumns()
         }
-        .id(viewModel.filteredVideosVersion)
+        .id("\(viewModel.filteredVideosVersion)-\(viewModel.listColumnConfigurationSignature)")
         .background(TableScrollHelper(scrollToRow: scrollToRow))
         // Backup: didSet on `isPlayingInline` restores columns before persisting; one delayed pass catches
         // a late SwiftUI table layout pass after unfreeze.
@@ -317,6 +219,217 @@ struct LibraryListView: View {
                 Text("The file will be moved to Trash.")
             } else {
                 Text("\(viewModel.pendingDeleteIds.count) files will be moved to Trash.")
+            }
+        }
+    }
+
+    @TableColumnBuilder<Video, KeyPathComparator<Video>>
+    private func listTableColumns() -> some TableColumnContent<Video, KeyPathComparator<Video>> {
+        TableColumn("Name", value: \.fileName) { video in
+            nameRowView(for: video)
+        }
+        .width(min: 200, ideal: 350)
+        .customizationID("name")
+
+        // Grouped so the outer `Table` column builder stays within SwiftUI’s sibling limit.
+        listStandardOptionalColumns()
+
+        // `ForEach` is not supported inside `TableColumnBuilder`; emit up to 16 custom columns by index.
+        // Split across two helpers: SwiftUI’s column builder limits sibling column count per block.
+        listCustomTableColumnsSlots0to7()
+        listCustomTableColumnsSlots8to15()
+    }
+
+    @TableColumnBuilder<Video, KeyPathComparator<Video>>
+    private func listStandardOptionalColumns() -> some TableColumnContent<Video, KeyPathComparator<Video>> {
+        if viewModel.isStandardListColumnVisible("duration") {
+            TableColumn("Duration", value: \.sortableDuration) { video in
+                Text(video.formattedDuration ?? "—")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 60, ideal: 80)
+            .alignment(.trailing)
+            .customizationID("duration")
+        }
+
+        if viewModel.isStandardListColumnVisible("resolution") {
+            TableColumn("Resolution", value: \.sortableResolutionHeight) { video in
+                if let label = video.resolutionLabel {
+                    Text(label)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("—")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .width(min: 60, ideal: 80)
+            .alignment(.center)
+            .customizationID("resolution")
+        }
+
+        if viewModel.isStandardListColumnVisible("size") {
+            TableColumn("Size", value: \.fileSize) { video in
+                Text(video.formattedFileSize)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 60, ideal: 80)
+            .alignment(.trailing)
+            .customizationID("size")
+        }
+
+        if viewModel.isStandardListColumnVisible("rating") {
+            TableColumn("Rating", value: \.rating) { video in
+                RatingView(rating: video.rating, size: 10) { newRating in
+                    viewModel.applyRating(to: [video.id], rating: newRating)
+                    Task { await viewModel.persistRating(for: [video.id], rating: newRating) }
+                }
+            }
+            .width(min: 70, ideal: 90)
+            .customizationID("rating")
+        }
+
+        if viewModel.isStandardListColumnVisible("dateAdded") {
+            TableColumn("Date Added", value: \.dateAdded) { video in
+                Text(video.dateAdded, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 80, ideal: 100)
+            .customizationID("dateAdded")
+        }
+
+        if viewModel.isStandardListColumnVisible("playCount") {
+            TableColumn("Plays", value: \.playCount) { video in
+                Text("\(video.playCount)")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 56, ideal: 72)
+            .alignment(.trailing)
+            .customizationID("playCount")
+        }
+
+        if viewModel.isStandardListColumnVisible("created") {
+            TableColumn("Created", value: \.sortableCreationDate) { video in
+                if let created = video.creationDate {
+                    Text(created, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("—")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .width(min: 80, ideal: 100)
+            .customizationID("created")
+        }
+
+        if viewModel.isStandardListColumnVisible("lastPlayed") {
+            TableColumn("Last Played", value: \.sortableLastPlayed) { video in
+                if let last = video.lastPlayed {
+                    Text(last, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("—")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .width(min: 80, ideal: 100)
+            .customizationID("lastPlayed")
+        }
+    }
+
+    @TableColumnBuilder<Video, KeyPathComparator<Video>>
+    private func listCustomTableColumnsSlots0to7() -> some TableColumnContent<Video, KeyPathComparator<Video>> {
+        let fields = viewModel.visibleCustomFieldsForList
+        if fields.indices.contains(0) { listCustomColumn(for: fields[0]) }
+        if fields.indices.contains(1) { listCustomColumn(for: fields[1]) }
+        if fields.indices.contains(2) { listCustomColumn(for: fields[2]) }
+        if fields.indices.contains(3) { listCustomColumn(for: fields[3]) }
+        if fields.indices.contains(4) { listCustomColumn(for: fields[4]) }
+        if fields.indices.contains(5) { listCustomColumn(for: fields[5]) }
+        if fields.indices.contains(6) { listCustomColumn(for: fields[6]) }
+        if fields.indices.contains(7) { listCustomColumn(for: fields[7]) }
+    }
+
+    @TableColumnBuilder<Video, KeyPathComparator<Video>>
+    private func listCustomTableColumnsSlots8to15() -> some TableColumnContent<Video, KeyPathComparator<Video>> {
+        let fields = viewModel.visibleCustomFieldsForList
+        if fields.indices.contains(8) { listCustomColumn(for: fields[8]) }
+        if fields.indices.contains(9) { listCustomColumn(for: fields[9]) }
+        if fields.indices.contains(10) { listCustomColumn(for: fields[10]) }
+        if fields.indices.contains(11) { listCustomColumn(for: fields[11]) }
+        if fields.indices.contains(12) { listCustomColumn(for: fields[12]) }
+        if fields.indices.contains(13) { listCustomColumn(for: fields[13]) }
+        if fields.indices.contains(14) { listCustomColumn(for: fields[14]) }
+        if fields.indices.contains(15) { listCustomColumn(for: fields[15]) }
+    }
+
+    @TableColumnBuilder<Video, KeyPathComparator<Video>>
+    private func listCustomColumn(for field: CustomMetadataFieldDefinition) -> some TableColumnContent<
+        Video,
+        KeyPathComparator<Video>
+    > {
+        TableColumn(field.name, value: \.fileName) { video in
+            Text(viewModel.listCustomFieldDisplay(for: video, field: field))
+                .lineLimit(2)
+                .foregroundStyle(.secondary)
+        }
+        .width(min: 80, ideal: 120)
+        .customizationID("custom-\(field.id.uuidString)")
+    }
+
+    @ViewBuilder
+    private func nameRowView(for video: Video) -> some View {
+        HStack(spacing: 8) {
+            AsyncThumbnailView(
+                filePath: video.filePath, thumbnailService: thumbnailService
+            )
+            .frame(width: 56, height: 36)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .onHover { hovering in
+                thumbnailPopoverVideoId = hovering ? video.id : nil
+            }
+            .popover(
+                isPresented: Binding(
+                    get: { thumbnailPopoverVideoId == video.id },
+                    set: { if !$0 { thumbnailPopoverVideoId = nil } }
+                ),
+                arrowEdge: .trailing
+            ) {
+                AsyncThumbnailView(
+                    filePath: video.filePath, thumbnailService: thumbnailService
+                )
+                .frame(width: 224, height: 144)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+
+            if viewModel.renamingVideoId == video.id {
+                TextField("", text: $viewModel.renameText)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color.accentColor, lineWidth: 2)
+                    )
+                    .focused($isRenameFocused)
+                    .onSubmit { commitRename(video) }
+                    .onExitCommand { cancelRename() }
+                    .onAppear {
+                        viewModel.isEditingText = true
+                        DispatchQueue.main.async {
+                            isRenameFocused = true
+                        }
+                    }
+                    .onDisappear {
+                        viewModel.isEditingText = false
+                    }
+            } else {
+                Text(video.fileName)
+                    .lineLimit(1)
             }
         }
     }

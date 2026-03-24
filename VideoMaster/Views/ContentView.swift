@@ -24,11 +24,7 @@ private struct LibraryContentView: View {
     @State private var listScrollPositionRow: Int?
     /// Must remove when the view goes away; repeated `onAppear` without removal stacks monitors and breaks handling.
     @State private var keyDownMonitor: Any?
-    @State private var isFilterStripHovered = false
-    /// Screen rect of the filter strip (for upward-exit detection).
-    @State private var filterStripScreenFrame: CGRect = .zero
-    /// When collapse-unhover is on: true only after leaving the strip by moving up into the list/grid.
-    @State private var filterStripCollapsedByUpwardExit = false
+    @State private var showListColumnsSheet = false
 
     private var navigationTitle: String {
         let name = DatabaseExportImport.activeLibraryDisplayName
@@ -57,12 +53,6 @@ private struct LibraryContentView: View {
         CGFloat(vm.browsingLayout.browserTopPaneHeight(for: vm.viewMode))
     }
 
-    /// Use saved splitter height unless collapse mode is on and the user left upward (thin strip) or hasn’t re-entered.
-    private var expandFilterStripToSavedHeight: Bool {
-        if !vm.collapseFilterStripWhenUnhovered { return true }
-        return isFilterStripHovered || !filterStripCollapsedByUpwardExit
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             // Browser column = list/grid + bottom filter columns; detail = right pane.
@@ -83,38 +73,13 @@ private struct LibraryContentView: View {
                         topPaneHeight: browsingSplitTopPaneHeight,
                         topID: vm.viewMode.rawValue,
                         bottomID: filterStripHostID,
-                        collapseFilterStripWhenUnhovered: vm.collapseFilterStripWhenUnhovered,
-                        expandFilterStripToSavedHeight: expandFilterStripToSavedHeight,
+                        expandFilterStrip: vm.showFilterStrip,
                         onTopHeightChanged: { h in
                             vm.updateCurrentLayoutWithSizes(browserTopPaneHeight: h)
                         },
                         top: { libraryContent },
                         bottom: {
                             BottomFilterColumnsView(viewModel: vm)
-                                .background {
-                                    FilterStripScreenFrameReader(screenFrame: $filterStripScreenFrame)
-                                }
-                                .onHover { inside in
-                                    if inside {
-                                        isFilterStripHovered = true
-                                        filterStripCollapsedByUpwardExit = false
-                                    } else {
-                                        isFilterStripHovered = false
-                                        guard vm.collapseFilterStripWhenUnhovered else { return }
-                                        let p = NSEvent.mouseLocation
-                                        let f = filterStripScreenFrame
-                                        guard f.width > 1, f.height > 1 else {
-                                            filterStripCollapsedByUpwardExit = false
-                                            return
-                                        }
-                                        // Screen coords: Y increases upward. Above strip top → moved into list/grid.
-                                        if p.y > f.maxY {
-                                            filterStripCollapsedByUpwardExit = true
-                                        } else {
-                                            filterStripCollapsedByUpwardExit = false
-                                        }
-                                    }
-                                }
                         }
                     )
                 },
@@ -125,9 +90,6 @@ private struct LibraryContentView: View {
             statusBar(vm: vm)
         }
         .task { vm.startObserving() }
-        .onChange(of: vm.collapseFilterStripWhenUnhovered) { _, enabled in
-            if !enabled { filterStripCollapsedByUpwardExit = false }
-        }
         .onAppear {
             guard keyDownMonitor == nil else { return }
             let lvm = vm
@@ -224,6 +186,36 @@ private struct LibraryContentView: View {
                         .help("Random video: filmstrip in detail first, then scroll list/grid to the selection")
 
                         SortMenuButton(viewModel: vm)
+
+                        if vm.viewMode == .list {
+                            Button {
+                                showListColumnsSheet = true
+                            } label: {
+                                Label("Columns", systemImage: "tablecells")
+                            }
+                            .help("Choose which columns appear in list view")
+                        }
+                    }
+                }
+                .sheet(isPresented: $showListColumnsSheet) {
+                    NavigationStack {
+                        Form {
+                            Section {
+                                ListColumnsSettingsContent(viewModel: vm)
+                            } header: {
+                                Text("List view columns")
+                            } footer: {
+                                Text("Name is always shown. Up to 16 custom columns at once (alphabetical). Reorder and resize columns using the table header.")
+                            }
+                        }
+                        .formStyle(.grouped)
+                        .navigationTitle("List columns")
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showListColumnsSheet = false }
+                            }
+                        }
+                        .frame(minWidth: 420, minHeight: 360)
                     }
                 }
                 .toolbar {
@@ -244,6 +236,11 @@ private struct LibraryContentView: View {
                     }
                 }
                 .frame(minWidth: 80)
+                .contextMenu {
+                    Button(vm.showFilterStrip ? "Collapse Filter Strip" : "Expand Filter Strip") {
+                        vm.showFilterStrip.toggle()
+                    }
+                }
     }
 
     @ViewBuilder
@@ -385,48 +382,5 @@ private struct LibraryContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)
-    }
-}
-
-// MARK: - Filter strip screen frame (upward exit detection)
-
-/// Reports the filter strip’s bounds in **screen** coordinates (matches `NSEvent.mouseLocation`).
-private struct FilterStripScreenFrameReader: NSViewRepresentable {
-    @Binding var screenFrame: CGRect
-
-    func makeNSView(context: Context) -> NSView {
-        FilterStripFrameReportingView()
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        guard let v = nsView as? FilterStripFrameReportingView else { return }
-        let binding = $screenFrame
-        v.onFrameChange = { [weak v] in
-            guard let v, let win = v.window else { return }
-            let r = win.convertToScreen(v.convert(v.bounds, to: nil))
-            DispatchQueue.main.async {
-                binding.wrappedValue = r
-            }
-        }
-        v.onFrameChange?()
-    }
-}
-
-private final class FilterStripFrameReportingView: NSView {
-    var onFrameChange: (() -> Void)?
-
-    override func layout() {
-        super.layout()
-        onFrameChange?()
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        onFrameChange?()
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        onFrameChange?()
     }
 }

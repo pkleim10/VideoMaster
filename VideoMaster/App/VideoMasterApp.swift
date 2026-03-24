@@ -30,14 +30,24 @@ struct VideoMasterApp: App {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(appState.libraryViewModel?.filteredVideos.isEmpty ?? true)
 
-                Button("Clear Tag Filters") {
-                    appState.libraryViewModel?.clearTagFilters()
+                Button("Clear Filters") {
+                    appState.libraryViewModel?.clearFilters()
+                }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(!appState.hasLibrary
+                    || ((appState.libraryViewModel?.selectedTagIds.isEmpty ?? true)
+                        && !(appState.libraryViewModel?.isRatingFilterActive ?? false)))
+
+                Button("Toggle Thumbnail / Filmstrip") {
+                    appState.libraryViewModel?.showThumbnailInDetail.toggle()
                 }
                 .keyboardShortcut("t", modifiers: [.command, .option])
                 .disabled(!appState.hasLibrary)
 
-                Button("Toggle Thumbnail / Filmstrip") {
-                    appState.libraryViewModel?.showThumbnailInDetail.toggle()
+                Button {
+                    appState.libraryViewModel?.showFilterStrip.toggle()
+                } label: {
+                    Text((appState.libraryViewModel?.showFilterStrip ?? true) ? "Collapse Filter Strip" : "Expand Filter Strip")
                 }
                 .keyboardShortcut("f", modifiers: [.command, .option])
                 .disabled(!appState.hasLibrary)

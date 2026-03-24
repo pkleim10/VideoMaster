@@ -91,7 +91,7 @@ enum RuleAttribute: String, Codable, CaseIterable, Identifiable {
         case .codec: "Video Codec"
         case .dateImported: "Date Imported"
         case .dateCreated: "Date Created"
-        case .playCount: "Play Count"
+        case .playCount: "Plays"
         case .rating: "Rating"
         case .tag: "Tag"
         }
