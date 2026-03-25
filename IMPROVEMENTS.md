@@ -6,7 +6,7 @@
 
 **Library & Browsing:** Grid/List views, sortable columns, search (filename only), sidebar filters (All, Recently Added, Recently Played, Top Rated, Corrupt), collections with rule-based membership, tag filtering (multi-select, AND/ANY).
 
-**Metadata & Organization:** Star ratings, tags, play count, last played, inline file renaming.
+**Metadata & Organization:** Star ratings, tags, play count, last played, inline file renaming, user-defined custom metadata fields (optional list columns).
 
 **Playback:** Inline AVPlayer in detail pane, filmstrip click-to-seek, external player, Surprise Me.
 
@@ -18,13 +18,13 @@
 
 ### Future / Larger Scope
 
-1. **Custom metadata** — User-defined key-value metadata (e.g. "Director", "Location"). **Video notes** are a special case of this (e.g. a long-text field or a built-in "Notes" key), not a separate feature.
-
-2. **Full documentation (web-based)** — Comprehensive user and developer documentation hosted on the web.
+1. **Full documentation (web-based)** — Comprehensive user and developer documentation hosted on the web.
 
 ---
 
 ### Completed
+
+- **Custom metadata** — Done. User-defined field definitions (Settings → Custom Metadata), values in the detail pane, optional list columns (multiline Text fields excluded from list columns). **Video notes** remain a natural follow-up (e.g. a long-text or built-in Notes field).
 
 - **Keyboard shortcuts** — Done. Menu commands include Cmd+Delete (delete), Cmd+Shift+R (remove from library), Cmd+Return (play in external player), Cmd+Shift+O (add folder), Cmd+Shift+S (Surprise Me), Cmd+Option+T (clear tag filters), and others; discoverable in the menu bar when a library is open.
 
