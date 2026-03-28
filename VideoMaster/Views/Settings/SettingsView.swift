@@ -171,6 +171,12 @@ struct VideoSettingsView: View {
             }
 
             Section {
+                Toggle("Start inline playback in full screen", isOn: $viewModel.playInlineStartsFullscreen)
+            } footer: {
+                Text("When enabled, starting playback from the detail preview (Play Video inline, or a filmstrip frame) opens a dedicated player window and enters full screen. Close that window to stop. The Play Video button that opens your default external app is unchanged.")
+            }
+
+            Section {
                 Picker("Maximum large preview thumbnail (long-edge)", selection: $viewModel.detailPreviewMaxLongEdge) {
                     ForEach(ThumbnailService.detailPreviewLongEdgeChoices, id: \.self) { w in
                         Text("\(w) px").tag(w)

@@ -78,6 +78,10 @@ final class LibraryViewModel {
     var tagFilterMode: MatchMode = .all {
         didSet { recomputeFilteredVideos() }
     }
+    /// Per-star rating filter (1...5); independent of `sidebarFilter`, like `selectedTagIds`.
+    var selectedRatingStars: Set<Int> = [] {
+        didSet { recomputeFilteredVideos() }
+    }
     var isScanning: Bool = false
     var scanProgress: String = ""
     var scanCurrent: Int = 0
@@ -193,6 +197,7 @@ final class LibraryViewModel {
     private static let lastAppliedFilmstripRowsKey = "VideoMaster.lastAppliedFilmstripRows"
     private static let lastAppliedFilmstripColumnsKey = "VideoMaster.lastAppliedFilmstripColumns"
     private static let surpriseMeAutoPlaysKey = "VideoMaster.surpriseMeAutoPlays"
+    private static let playInlineStartsFullscreenKey = "VideoMaster.playInlineStartsFullscreen"
     private static let recentlyAddedDaysKey = "VideoMaster.recentlyAddedDays"
     private static let recentlyPlayedDaysKey = "VideoMaster.recentlyPlayedDays"
     private static let topRatedMinRatingKey = "VideoMaster.topRatedMinRating"
@@ -306,6 +311,13 @@ final class LibraryViewModel {
     var surpriseMeAutoPlays: Bool = true {
         didSet {
             UserDefaults.standard.set(surpriseMeAutoPlays, forKey: Self.surpriseMeAutoPlaysKey)
+        }
+    }
+
+    /// When true, inline playback (detail pane / filmstrip) opens in a separate window and enters full screen immediately. Does not affect "Play Video" opening the default external app.
+    var playInlineStartsFullscreen: Bool = false {
+        didSet {
+            UserDefaults.standard.set(playInlineStartsFullscreen, forKey: Self.playInlineStartsFullscreenKey)
         }
     }
 
@@ -691,6 +703,9 @@ final class LibraryViewModel {
         excludeCorrupt = defaults.bool(forKey: Self.excludeCorruptKey)
         confirmDeletions = defaults.object(forKey: Self.confirmDeletionsKey) as? Bool ?? true
         surpriseMeAutoPlays = defaults.object(forKey: Self.surpriseMeAutoPlaysKey) as? Bool ?? true
+        if defaults.object(forKey: Self.playInlineStartsFullscreenKey) != nil {
+            playInlineStartsFullscreen = defaults.bool(forKey: Self.playInlineStartsFullscreenKey)
+        }
         if let rows = defaults.object(forKey: Self.filmstripRowsKey) as? Int, rows > 0 {
             defaultFilmstripRows = rows
         }
@@ -897,6 +912,7 @@ final class LibraryViewModel {
             sidebarFilter: sidebarFilter,
             selectedTagIds: selectedTagIds,
             tagFilterMode: tagFilterMode,
+            selectedRatingStars: selectedRatingStars,
             tableSortOrder: tableSortOrder,
             excludeCorrupt: excludeCorrupt,
             searchText: searchText,
@@ -926,6 +942,7 @@ final class LibraryViewModel {
         let sidebarFilter: SidebarFilter?
         let selectedTagIds: Set<Int64>
         let tagFilterMode: MatchMode
+        let selectedRatingStars: Set<Int>
         let tableSortOrder: [KeyPathComparator<Video>]
         let excludeCorrupt: Bool
         let searchText: String
@@ -935,6 +952,12 @@ final class LibraryViewModel {
         let recentlyAddedDays: Int
         let recentlyPlayedDays: Int
         let topRatedMinRating: Int
+    }
+
+    /// Multiple star levels are OR’d: video is included if its rating is in the selected set.
+    private nonisolated static func applyRatingFilter(selectedStars: Set<Int>, base: [Video]) -> [Video] {
+        guard !selectedStars.isEmpty else { return base }
+        return base.filter { selectedStars.contains($0.rating) }
     }
 
     private nonisolated static func computeFilteredResult(snapshot: FilterSnapshot, collectionRepo: CollectionRepository) -> (videos: [Video], tagCounts: [Int64: Int]) {
@@ -968,8 +991,6 @@ final class LibraryViewModel {
             baseResult = baseResult.filter { isCorrupt($0) }
         case .missing:
             baseResult = baseResult.filter { snapshot.missingVideoIds.contains($0.id) }
-        case .rating(let stars):
-            baseResult = baseResult.filter { $0.rating == stars }
         case .collection(let collection):
             guard let collectionId = collection.id else {
                 return ([], [:])
@@ -989,6 +1010,8 @@ final class LibraryViewModel {
         default:
             break
         }
+
+        baseResult = Self.applyRatingFilter(selectedStars: snapshot.selectedRatingStars, base: baseResult)
 
         let tagCounts = computeTagCounts(snapshot: snapshot, baseVideos: baseResult)
 
@@ -1122,7 +1145,7 @@ final class LibraryViewModel {
         tagCounts = counts
     }
 
-    /// Videos after applying primary filter (library/collection), before tag filter.
+    /// Videos after applying library/collection sidebar filter and per-star rating filter, before tag filter.
     private func baseVideosForPrimaryFilter() -> [Video] {
         var result = videos
         let isCorruptFilter = sidebarFilter == .corrupt
@@ -1147,8 +1170,6 @@ final class LibraryViewModel {
             result = result.filter { Self.isCorrupt($0) }
         case .missing:
             result = result.filter { missingVideoIds.contains($0.id) }
-        case .rating(let stars):
-            result = result.filter { $0.rating == stars }
         case .collection(let collection):
             guard let collectionId = collection.id else { return [] }
             let rules = cachedCollectionRules[collectionId] ?? []
@@ -1164,6 +1185,7 @@ final class LibraryViewModel {
         default:
             break
         }
+        result = Self.applyRatingFilter(selectedStars: selectedRatingStars, base: result)
         return result
     }
 
@@ -1650,17 +1672,14 @@ final class LibraryViewModel {
         selectedTagIds = []
     }
 
-    /// True when the Library strip’s per-star rating filter is active (not Top Rated, etc.).
+    /// True when the filter strip’s per-star rating filter is active.
     var isRatingFilterActive: Bool {
-        if case .rating = sidebarFilter { return true }
-        return false
+        !selectedRatingStars.isEmpty
     }
 
-    /// Clears the per-star rating filter (Library strip → Rating). No-op if another sidebar filter is active.
+    /// Clears the per-star rating filter (filter strip → Rating).
     func clearRatingFilter() {
-        if case .rating = sidebarFilter {
-            sidebarFilter = .all
-        }
+        selectedRatingStars = []
     }
 
     /// Clears tag filters and the per-star rating filter (View menu **⌘⌥C**).

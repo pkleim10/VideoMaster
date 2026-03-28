@@ -24,6 +24,7 @@ struct VideoDetailView: View {
     @State private var isEditingName = false
     @State private var editedName: String = ""
     @State private var inlinePlayer: AVPlayer?
+    @State private var fullscreenInlineController: FullscreenInlinePlayerWindowController?
     /// Tracks detail column size for auto-adjust splitter (thumbnail/filmstrip vs metadata).
     @State private var detailPaneSize: CGSize = .zero
     private var effectiveHeight: CGFloat { viewModel.effectiveDetailHeight }
@@ -176,6 +177,35 @@ struct VideoDetailView: View {
             }
     }
 
+    private var fullscreenPlaybackPlaceholder: some View {
+        let detailStill = detailThumbnailHi ?? detailThumbnailLo
+        return ZStack {
+            if let detailStill {
+                Image(nsImage: detailStill)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else if let filmstrip {
+                Image(nsImage: filmstrip)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.1))
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            }
+            VStack(spacing: 8) {
+                Text("Playing full screen")
+                    .font(.headline)
+                Text("Close the player window to stop.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .padding()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
     private func resizeHandle(totalHeight: CGFloat) -> some View {
         Rectangle()
             .fill(Color.clear)
@@ -212,9 +242,15 @@ struct VideoDetailView: View {
 
         return ZStack {
                 if viewModel.isPlayingInline, let player = inlinePlayer {
-                    FloatingPlayerView(player: player)
-                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    if fullscreenInlineController != nil {
+                        fullscreenPlaybackPlaceholder
+                            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        FloatingPlayerView(player: player)
+                            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
                 } else if preferThumbnail, let detailStill {
                     Image(nsImage: detailStill)
                         .resizable()
@@ -279,9 +315,21 @@ struct VideoDetailView: View {
             player.play()
         }
         Task { await viewModel.recordPlay(for: video) }
+
+        if viewModel.playInlineStartsFullscreen {
+            let controller = FullscreenInlinePlayerWindowController()
+            fullscreenInlineController = controller
+            controller.present(player: player, title: video.fileName, startWindowInFullscreen: true) {
+                fullscreenInlineController = nil
+                inlinePlayer = nil
+                viewModel.isPlayingInline = false
+            }
+        }
     }
 
     private func stopInlinePlayback() {
+        fullscreenInlineController?.closeWindow()
+        fullscreenInlineController = nil
         inlinePlayer?.pause()
         inlinePlayer = nil
     }

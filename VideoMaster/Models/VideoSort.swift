@@ -115,7 +115,6 @@ enum SidebarFilter: Hashable {
     case duplicates
     case corrupt
     case missing
-    case rating(Int)
     case collection(VideoCollection)
 }
 

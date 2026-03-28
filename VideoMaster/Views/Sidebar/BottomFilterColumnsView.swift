@@ -36,6 +36,13 @@ struct BottomFilterColumnsView: View {
             Button(viewModel.showFilterStrip ? "Collapse Filter Strip" : "Expand Filter Strip") {
                 viewModel.showFilterStrip.toggle()
             }
+            Divider()
+            Toggle("Recently Added", isOn: $viewModel.showRecentlyAdded)
+            Toggle("Recently Played", isOn: $viewModel.showRecentlyPlayed)
+            Toggle("Top Rated", isOn: $viewModel.showTopRated)
+            Toggle("Duplicates", isOn: $viewModel.showDuplicates)
+            Toggle("Corrupt", isOn: $viewModel.showCorrupt)
+            Toggle("Missing", isOn: $viewModel.showMissing)
         }
         .sheet(isPresented: $showNewCollectionSheet) {
             CollectionEditorView(
@@ -167,14 +174,13 @@ struct BottomFilterColumnsView: View {
     private var ratingColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
             ratingSectionHeader
-            List(selection: $viewModel.sidebarFilter) {
-                ForEach((1...5).reversed(), id: \.self) { stars in
-                    ratingRow(stars: stars, count: viewModel.libraryCounts.byRating[stars] ?? 0)
-                        .tag(SidebarFilter.rating(stars))
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach((1...5).reversed(), id: \.self) { stars in
+                        ratingRowSelectable(stars: stars, count: viewModel.libraryCounts.byRating[stars] ?? 0)
+                    }
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
             .frame(minHeight: 120)
         }
         .padding(8)
@@ -265,9 +271,9 @@ struct BottomFilterColumnsView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
-            if case .rating = viewModel.sidebarFilter {
+            if !viewModel.selectedRatingStars.isEmpty {
                 Button("Remove Filter") {
-                    viewModel.sidebarFilter = .all
+                    viewModel.clearRatingFilter()
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -276,6 +282,13 @@ struct BottomFilterColumnsView: View {
             }
         }
         .padding(.bottom, 4)
+        .contextMenu {
+            Button("Clear Filters") {
+                viewModel.clearFilters()
+            }
+            .disabled(viewModel.selectedTagIds.isEmpty && !viewModel.isRatingFilterActive)
+            .keyboardShortcut("c", modifiers: [.command, .option])
+        }
     }
 
     private var tagsSectionHeader: some View {
@@ -464,6 +477,39 @@ struct BottomFilterColumnsView: View {
                 .padding(.vertical, 2)
                 .background(.quaternary, in: Capsule())
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func ratingRowSelectable(stars: Int, count: Int) -> some View {
+        let isSelected = viewModel.selectedRatingStars.contains(stars)
+        return ratingRow(stars: stars, count: count)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 4)
+            .background(
+                isSelected
+                    ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.3))
+                    : nil
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                handleRatingTap(stars: stars)
+            }
+    }
+
+    private func handleRatingTap(stars: Int) {
+        let cmdHeld = NSEvent.modifierFlags.contains(.command)
+        if cmdHeld {
+            if viewModel.selectedRatingStars.contains(stars) {
+                viewModel.selectedRatingStars.remove(stars)
+            } else {
+                viewModel.selectedRatingStars.insert(stars)
+            }
+        } else {
+            if viewModel.selectedRatingStars == Set([stars]) {
+                viewModel.selectedRatingStars = []
+            } else {
+                viewModel.selectedRatingStars = Set([stars])
+            }
         }
     }
 
