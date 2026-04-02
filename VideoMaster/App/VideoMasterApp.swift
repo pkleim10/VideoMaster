@@ -10,13 +10,6 @@ struct VideoMasterApp: App {
             ContentView()
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)
-                .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        NSApplication.shared.windows
-                            .first { $0.isKeyWindow || !$0.contentView!.subviews.isEmpty }?
-                            .styleMask.remove(.closable)
-                    }
-                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     DatabaseExportImport.checkpointAndCleanWAL()
                 }
