@@ -137,6 +137,12 @@ final class LibraryViewModel {
                 reapplyListColumnCustomizationAfterPlaybackExit()
                 if viewMode != .list {
                     updateCurrentLayoutFromLive()
+                    // The grid loses its scroll position when the browser content unfreezes after inline
+                    // playback. Re-anchor to the played/selected video (robust item-based scroll; restoring
+                    // the raw pixel offset races SwiftUI's lazy layout and lands blank/mid-list).
+                    if let id = lastSelectedVideoId ?? selectedVideoIds.first {
+                        scrollToVideoId = id
+                    }
                 }
             }
         }
