@@ -154,6 +154,7 @@ struct LibraryListView: View {
         }
         .id("\(viewModel.filteredVideosVersion)-\(viewModel.listColumnConfigurationSignature)")
         .background(TableScrollHelper(scrollToRow: scrollToRow))
+        .background(ScrollCommandHandler(command: viewModel.scrollCommand, mode: .list))
         // Backup: didSet on `isPlayingInline` restores columns before persisting; one delayed pass catches
         // a late SwiftUI table layout pass after unfreeze.
         .onChange(of: viewModel.isPlayingInline) { _, playing in
@@ -237,6 +238,18 @@ struct LibraryListView: View {
                 }
                 .disabled(ffmpegPath == nil)
                 .help(ffmpegPath == nil ? "Requires ffmpeg — configure the path in Settings \u{2192} Tools" : "")
+                Button("Move Files\u{2026}") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                    panel.allowsMultipleSelection = false
+                    panel.prompt = "Move Here"
+                    panel.message = "Choose a destination folder"
+                    if panel.runModal() == .OK, let dest = panel.url {
+                        let selected = viewModel.filteredVideos.filter { ids.contains($0.id) }
+                        Task { await viewModel.moveVideos(selected, to: dest) }
+                    }
+                }
                 Divider()
                 Button("Modify Filmstrip\u{2026}") {
                     filmstripVideo = video
@@ -365,6 +378,7 @@ struct LibraryListView: View {
             TableColumn("Date Added", value: \.dateAdded) { video in
                 Text(video.dateAdded, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
                     .foregroundStyle(.secondary)
+                    .help(video.dateAdded.formatted(date: .abbreviated, time: .shortened))
             }
             .width(min: 80, ideal: 100)
             .customizationID("dateAdded")
@@ -386,6 +400,7 @@ struct LibraryListView: View {
                 if let created = video.creationDate {
                     Text(created, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
                         .foregroundStyle(.secondary)
+                        .help(created.formatted(date: .abbreviated, time: .shortened))
                 } else {
                     Text("—")
                         .foregroundStyle(.tertiary)
@@ -400,6 +415,7 @@ struct LibraryListView: View {
                 if let last = video.lastPlayed {
                     Text(last, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
                         .foregroundStyle(.secondary)
+                        .help(last.formatted(date: .abbreviated, time: .shortened))
                 } else {
                     Text("—")
                         .foregroundStyle(.tertiary)

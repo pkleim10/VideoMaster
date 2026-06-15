@@ -155,6 +155,22 @@ final class LibraryViewModel {
     /// Surprise Me: scroll browsing pane only after detail has finished (see `finishSurpriseScrollIfNeeded`).
     private(set) var pendingSurpriseScrollVideoId: String?
     var scrollToSelectedOnViewSwitch: Bool = false
+
+    /// Imperative top/bottom/page scroll requests from the list/grid nav bar. The token de-dupes so the
+    /// handler fires once per press and ignores its own replays on view re-mount / SwiftUI re-render.
+    struct ScrollCommand: Equatable {
+        enum Kind { case top, bottom, pageUp, pageDown }
+        let token: Int
+        let kind: Kind
+    }
+    private(set) var scrollCommand: ScrollCommand?
+    private var scrollCommandToken: Int = 0
+
+    func issueScrollCommand(_ kind: ScrollCommand.Kind) {
+        scrollCommandToken += 1
+        scrollCommand = ScrollCommand(token: scrollCommandToken, kind: kind)
+    }
+
     /// Set by renameVideo when sorted by name; consumed by applyFilteredVideos to scroll in same cycle as bump.
     var pendingScrollToAfterRename: String?
     /// Set when sort changes with exactly one selected row; consumed in `applyFilteredVideos` to scroll after reorder.
@@ -340,6 +356,8 @@ final class LibraryViewModel {
     var isConverting: Bool = false
     var conversionProgress: String = ""
     private var conversionQueue: [(video: Video, ffmpegPath: String)] = []
+    var isMoving: Bool = false
+    var moveProgress: String = ""
 
     private func resetFilterIfHidden() {
         switch sidebarFilter {
@@ -815,8 +833,7 @@ final class LibraryViewModel {
         if let data = defaults.data(forKey: Self.recentlyConvertedEntriesKey),
            let decoded = try? JSONDecoder().decode([ConvertedEntry].self, from: data)
         {
-            let cutoff = Date().addingTimeInterval(-30 * 24 * 3600)
-            recentlyConvertedEntries = decoded.filter { $0.date >= cutoff }
+            recentlyConvertedEntries = decoded
         }
         if let v = defaults.object(forKey: Self.missingCountScannedKey) as? Bool { missingCountScanned = v }
         if let ids = defaults.stringArray(forKey: Self.missingVideoIdsKey) { missingVideoIds = Set(ids) }
@@ -1005,7 +1022,7 @@ final class LibraryViewModel {
             recentlyAddedDays: recentlyAddedDays,
             recentlyPlayedDays: recentlyPlayedDays,
             topRatedMinRating: topRatedMinRating,
-            recentlyConvertedPaths: Set(recentlyConvertedEntries.map(\.path))
+            recentlyConvertedDates: recentlyConvertedEntries.reduce(into: [:]) { dict, e in dict[e.path] = e.date }
         )
         let repo = collectionRepo
 
@@ -1037,7 +1054,7 @@ final class LibraryViewModel {
         let recentlyAddedDays: Int
         let recentlyPlayedDays: Int
         let topRatedMinRating: Int
-        let recentlyConvertedPaths: Set<String>
+        let recentlyConvertedDates: [String: Date]
     }
 
     /// Multiple star levels are OR’d: video is included if its rating is in the selected set.
@@ -1079,7 +1096,7 @@ final class LibraryViewModel {
         case .missing:
             baseResult = baseResult.filter { snapshot.missingVideoIds.contains($0.id) }
         case .recentlyConverted:
-            baseResult = baseResult.filter { snapshot.recentlyConvertedPaths.contains($0.filePath) }
+            baseResult = baseResult.filter { snapshot.recentlyConvertedDates[$0.filePath] != nil }
         case .collection(let collection):
             guard let collectionId = collection.id else {
                 return ([], [:])
@@ -1117,6 +1134,11 @@ final class LibraryViewModel {
 
         if snapshot.sidebarFilter == .recentlyPlayed {
             result = result.sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
+        } else if snapshot.sidebarFilter == .recentlyConverted {
+            result = result.sorted {
+                (snapshot.recentlyConvertedDates[$0.filePath] ?? .distantPast) >
+                (snapshot.recentlyConvertedDates[$1.filePath] ?? .distantPast)
+            }
         } else {
             result.sort(using: snapshot.tableSortOrder)
         }
@@ -1731,6 +1753,50 @@ final class LibraryViewModel {
         }
     }
 
+    func moveVideos(_ videosToMove: [Video], to destinationFolder: URL) async {
+        isMoving = true
+        defer { isMoving = false; moveProgress = "" }
+        let total = videosToMove.count
+        for (index, video) in videosToMove.enumerated() {
+            let name = video.fileName
+            let remaining = total - index - 1
+            moveProgress = remaining > 0
+                ? "Moving '\(name)'… (\(remaining) remaining)"
+                : "Moving '\(name)'…"
+            let newURL = destinationFolder.appendingPathComponent(name)
+            if newURL == video.url { continue }
+            guard !FileManager.default.fileExists(atPath: newURL.path) else {
+                moveProgress = "Skipped '\(name)': file already exists at destination"
+                try? await Task.sleep(for: .seconds(2))
+                continue
+            }
+            do {
+                try FileManager.default.moveItem(at: video.url, to: newURL)
+            } catch {
+                moveProgress = "Failed to move '\(name)': \(error.localizedDescription)"
+                try? await Task.sleep(for: .seconds(2))
+                continue
+            }
+            guard let dbId = video.databaseId else { continue }
+            do {
+                try await videoRepo.renameVideo(videoId: dbId, newFilePath: newURL.path, newFileName: name)
+            } catch {
+                try? FileManager.default.moveItem(at: newURL, to: video.url)
+                moveProgress = "Failed to update library for '\(name)'"
+                try? await Task.sleep(for: .seconds(2))
+                continue
+            }
+            thumbnailService.migrateCacheKey(from: video.filePath, to: newURL.path)
+            if selectedVideoIds.contains(video.filePath) {
+                selectedVideoIds.remove(video.filePath)
+                selectedVideoIds.insert(newURL.path)
+            }
+            if lastSelectedVideoId == video.filePath {
+                lastSelectedVideoId = newURL.path
+            }
+        }
+    }
+
     func videoConvertedToMP4(_ video: Video, newPath: String) async {
         guard let dbId = video.databaseId else { return }
         let newURL = URL(fileURLWithPath: newPath)
@@ -1751,7 +1817,9 @@ final class LibraryViewModel {
             lastSelectedVideoId = newPath
         }
 
-        guard let idx = videos.firstIndex(where: { $0.filePath == video.filePath }) else { return }
+        // Look up by DB id, not filePath: GRDB's observation may have already updated
+        // the in-memory path (e.g. wmv→mp4) before we reach this line.
+        guard let idx = videos.firstIndex(where: { $0.databaseId == dbId }) else { return }
         var updated = videos
         updated[idx].filePath = newPath
         updated[idx].fileName = newFileName
@@ -1804,6 +1872,13 @@ final class LibraryViewModel {
             isConverting = false
             conversionProgress = ""
         }
+
+        recentlyConvertedEntries = []
+        if let data = try? JSONEncoder().encode(recentlyConvertedEntries) {
+            UserDefaults.standard.set(data, forKey: Self.recentlyConvertedEntriesKey)
+        }
+        updateLibraryCounts()
+        recomputeFilteredVideos()
 
         while !conversionQueue.isEmpty {
             let job = conversionQueue[0]
@@ -1895,6 +1970,11 @@ final class LibraryViewModel {
             await videoConvertedToMP4(video, newPath: outputURL.path)
             addRecentlyConverted(path: outputURL.path)
         } else {
+            // Delete ffmpeg's partial/0-byte output before restoring. Skip when re-encoding
+            // in place (source already .mp4), where outputURL == the file we're restoring.
+            if outputURL.path != video.filePath {
+                try? fm.removeItem(at: outputURL)
+            }
             // Restore original
             try? fm.moveItem(at: backupURL, to: videoURL)
             conversionProgress = "Re-encoding failed for '\(video.fileName)'"
@@ -1903,8 +1983,6 @@ final class LibraryViewModel {
     }
 
     private func addRecentlyConverted(path: String) {
-        let cutoff = Date().addingTimeInterval(-30 * 24 * 3600)
-        recentlyConvertedEntries = recentlyConvertedEntries.filter { $0.date >= cutoff }
         recentlyConvertedEntries.append(ConvertedEntry(path: path, date: Date()))
         if let data = try? JSONEncoder().encode(recentlyConvertedEntries) {
             UserDefaults.standard.set(data, forKey: Self.recentlyConvertedEntriesKey)

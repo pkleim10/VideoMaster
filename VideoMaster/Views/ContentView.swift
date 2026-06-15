@@ -105,8 +105,104 @@ private struct LibraryContentView: View {
         }
     }
 
-    @ViewBuilder
     private var libraryContent: some View {
+        VStack(spacing: 0) {
+            libraryNavBar
+            contentBody
+        }
+    }
+
+    /// Inline bar directly above the list/grid: the List/Grid mode picker plus the top/bottom/page scroll
+    /// controls. Each scroll button hosts its keyboard shortcut; the per-view `ScrollCommandHandler` scrolls.
+    private var libraryNavBar: some View {
+        HStack(spacing: 8) {
+            Picker("View Mode", selection: Binding(
+                get: { vm.viewMode },
+                set: { newValue in
+                    vm.viewMode = newValue
+                    vm.savePreferences()
+                    if !vm.selectedVideoIds.isEmpty {
+                        vm.scrollToSelectedOnViewSwitch = true
+                    }
+                }
+            )) {
+                Label("List", systemImage: "list.bullet")
+                    .tag(ViewMode.list)
+                Label("Grid", systemImage: "square.grid.2x2")
+                    .tag(ViewMode.grid)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 80)
+
+            if vm.viewMode == .grid {
+                Picker("Grid Size", selection: $vm.gridSize) {
+                    ForEach(GridSize.allCases, id: \.self) { size in
+                        Text(size.label).tag(size)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 100)
+                .onChange(of: vm.gridSize) {
+                    vm.savePreferences()
+                }
+                .help("Thumbnail size")
+            }
+
+            if vm.viewMode == .list {
+                Button {
+                    showListColumnsSheet = true
+                } label: {
+                    Label("Columns", systemImage: "tablecells")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.bordered)
+                .help("Choose which columns appear in list view")
+            }
+
+            SortMenuButton(viewModel: vm)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.bordered)
+                .fixedSize()
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Button { vm.issueScrollCommand(.top) } label: {
+                    Image(systemName: "arrow.up.to.line")
+                }
+                .help("Go to top (⌘↑)")
+                .keyboardShortcut(.upArrow, modifiers: .command)
+
+                Button { vm.issueScrollCommand(.pageUp) } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .help("Page up (⌥↑)")
+                .keyboardShortcut(.upArrow, modifiers: .option)
+
+                Button { vm.issueScrollCommand(.pageDown) } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .help("Page down (⌥↓)")
+                .keyboardShortcut(.downArrow, modifiers: .option)
+
+                Button { vm.issueScrollCommand(.bottom) } label: {
+                    Image(systemName: "arrow.down.to.line")
+                }
+                .help("Go to bottom (⌘↓)")
+                .keyboardShortcut(.downArrow, modifiers: .command)
+            }
+            .buttonStyle(.bordered)
+            .disabled(vm.filteredVideos.isEmpty)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var contentBody: some View {
         Group {
             if vm.viewMode == .grid {
                 LibraryGridView(
@@ -159,24 +255,6 @@ private struct LibraryContentView: View {
                         .disabled(vm.isScanning)
                         .help("Scan data sources for new video files")
 
-                        Picker("View Mode", selection: Binding(
-                            get: { vm.viewMode },
-                            set: { newValue in
-                                vm.viewMode = newValue
-                                vm.savePreferences()
-                                if !vm.selectedVideoIds.isEmpty {
-                                    vm.scrollToSelectedOnViewSwitch = true
-                                }
-                            }
-                        )) {
-                            Label("List", systemImage: "list.bullet")
-                                .tag(ViewMode.list)
-                            Label("Grid", systemImage: "square.grid.2x2")
-                                .tag(ViewMode.grid)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 80)
-
                         Button(action: {
                             vm.surpriseMePickRandom()
                         }) {
@@ -184,17 +262,6 @@ private struct LibraryContentView: View {
                         }
                         .disabled(vm.filteredVideos.isEmpty)
                         .help("Random video: filmstrip in detail first, then scroll list/grid to the selection")
-
-                        SortMenuButton(viewModel: vm)
-
-                        if vm.viewMode == .list {
-                            Button {
-                                showListColumnsSheet = true
-                            } label: {
-                                Label("Columns", systemImage: "tablecells")
-                            }
-                            .help("Choose which columns appear in list view")
-                        }
                     }
                 }
                 .sheet(isPresented: $showListColumnsSheet) {
@@ -381,6 +448,14 @@ private struct LibraryContentView: View {
                     ProgressView()
                         .controlSize(.mini)
                     Text(vm.conversionProgress)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if vm.isMoving {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(vm.moveProgress)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -63,8 +63,6 @@ struct LibraryGridView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            gridSizeBar
-
             GeometryReader { geo in
                 let padding: CGFloat = 16
                 let availableWidth = geo.size.width - padding * 2
@@ -104,6 +102,7 @@ struct LibraryGridView: View {
                         .padding(padding)
                         .scrollTargetLayout()
                         .background(ScrollbarEnabler())
+                        .background(ScrollCommandHandler(command: viewModel.scrollCommand, mode: .grid))
                     }
                     .scrollPosition(id: $scrollPositionId, anchor: .center)
                     .onChange(of: viewModel.scrollToVideoId, initial: true) { _, targetId in
@@ -128,13 +127,13 @@ struct LibraryGridView: View {
         .focusable()
         .focusEffectDisabled(true)
         .focused($gridArrowKeyFocused)
-        .onKeyPress(.upArrow) {
-            guard !viewModel.isEditingText else { return .ignored }
+        .onKeyPress(keys: [.upArrow]) { press in
+            guard press.modifiers.isEmpty, !viewModel.isEditingText else { return .ignored }
             viewModel.navigateFilteredVideoStep(-1)
             return .handled
         }
-        .onKeyPress(.downArrow) {
-            guard !viewModel.isEditingText else { return .ignored }
+        .onKeyPress(keys: [.downArrow]) { press in
+            guard press.modifiers.isEmpty, !viewModel.isEditingText else { return .ignored }
             viewModel.navigateFilteredVideoStep(1)
             return .handled
         }
@@ -190,24 +189,6 @@ struct LibraryGridView: View {
                 Text("\(viewModel.pendingDeleteIds.count) files will be moved to Trash.")
             }
         }
-    }
-
-    private var gridSizeBar: some View {
-        HStack {
-            Spacer()
-            Picker("", selection: $viewModel.gridSize) {
-                ForEach(GridSize.allCases, id: \.self) { size in
-                    Text(size.label).tag(size)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 100)
-            .onChange(of: viewModel.gridSize) {
-                viewModel.savePreferences()
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 
     private func handleClick(video: Video) {
@@ -300,6 +281,21 @@ struct LibraryGridView: View {
         Button("Rename") {
             viewModel.renameText = video.fileName
             viewModel.renamingVideoId = video.id
+        }
+        Button("Move Files\u{2026}") {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            panel.prompt = "Move Here"
+            panel.message = "Choose a destination folder"
+            if panel.runModal() == .OK, let dest = panel.url {
+                let ids = viewModel.selectedVideoIds.contains(video.id)
+                    ? viewModel.selectedVideoIds
+                    : [video.id]
+                let selected = viewModel.filteredVideos.filter { ids.contains($0.id) }
+                Task { await viewModel.moveVideos(selected, to: dest) }
+            }
         }
         Divider()
         Button("Modify Filmstrip\u{2026}") {
