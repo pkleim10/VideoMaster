@@ -36,6 +36,9 @@ struct VideoDetailView: View {
     @State private var subtitleTrack = SubtitleTrack()
     @State private var inlinePlayerError: String? = nil
     @State private var playerStatusTask: Task<Void, Never>? = nil
+    /// In-flight hi-res detail-preview load. Cancelled when the selection changes so rapid clicking doesn't
+    /// pile up main-actor decodes / AV generations for videos already navigated past.
+    @State private var detailPreviewTask: Task<Void, Never>? = nil
     /// Tracks detail column size for auto-adjust splitter (thumbnail/filmstrip vs metadata).
     @State private var detailPaneSize: CGSize = .zero
     private var effectiveHeight: CGFloat { viewModel.effectiveDetailHeight }
@@ -1224,10 +1227,14 @@ struct VideoDetailView: View {
 
     /// Disk-backed hi-res still (long edge from settings); 400px shows first, then swaps when JPEG is ready.
     private func scheduleDetailPreviewLoad(for videoForPreview: Video) {
+        // Cancel any preview still loading for a prior selection so rapid clicking can't accumulate
+        // main-actor decodes / gated AV generations (`detailPreviewImage` honors cancellation).
+        detailPreviewTask?.cancel()
         let stableId = videoForPreview.id
         let longEdge = viewModel.detailPreviewMaxLongEdge
-        Task(priority: .userInitiated) {
+        detailPreviewTask = Task(priority: .userInitiated) {
             guard let large = await thumbnailService.detailPreviewImage(for: videoForPreview, longEdge: longEdge) else { return }
+            if Task.isCancelled { return }
             await MainActor.run {
                 let primary = viewModel.lastSelectedVideoId ?? viewModel.selectedVideoIds.first
                 let stillSelected = primary == stableId || viewModel.selectedVideoIds.contains(stableId)

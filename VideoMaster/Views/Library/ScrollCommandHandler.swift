@@ -62,6 +62,11 @@ struct ScrollCommandHandler: NSViewRepresentable {
         case .bottom: y = maxY
         case .pageUp: y = max(minY, y - page)
         case .pageDown: y = min(maxY, y + page)
+        case .toRow(let index, let total):
+            // Map row → document fraction using the *actual* document height (robust to per-cell height
+            // variance), then center it. Clamped to the scrollable range.
+            let rowTop = (CGFloat(index) / CGFloat(max(1, total))) * docHeight
+            y = min(maxY, max(minY, rowTop - visibleH / 2))
         }
 
         let target = NSPoint(x: clip.bounds.origin.x, y: y)

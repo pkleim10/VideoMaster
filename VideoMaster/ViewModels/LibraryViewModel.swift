@@ -159,7 +159,12 @@ final class LibraryViewModel {
     /// Imperative top/bottom/page scroll requests from the list/grid nav bar. The token de-dupes so the
     /// handler fires once per press and ignores its own replays on view re-mount / SwiftUI re-render.
     struct ScrollCommand: Equatable {
-        enum Kind { case top, bottom, pageUp, pageDown }
+        enum Kind: Equatable {
+            case top, bottom, pageUp, pageDown
+            /// Jump so row `index` of `total` rows is centered — used to restore the selection on a
+            /// List→Grid switch without SwiftUI instantiating every intermediate cell (the ~6s freeze).
+            case toRow(index: Int, total: Int)
+        }
         let token: Int
         let kind: Kind
     }
@@ -1063,6 +1068,45 @@ final class LibraryViewModel {
         return base.filter { selectedStars.contains($0.rating) }
     }
 
+    /// Concrete, fast replacement for `result.sort(using: [KeyPathComparator])`. The KeyPathComparator path
+    /// boxes values and dynamically resolves the key path on every comparison — ~200ms for 12k items even on
+    /// a trivial Date sort. Comparing concrete fields directly is ~10–20× faster. Mirrors
+    /// `VideoSort.comparators(ascending:)`; `.name` uses `localizedStandardCompare` to match the natural/
+    /// localized ordering of the Table column's String comparator.
+    private nonisolated static func sortByTableOrder(_ videos: [Video], comparators: [KeyPathComparator<Video>]) -> [Video] {
+        let first = comparators.first
+        let sort = VideoSort.from(keyPath: first?.keyPath ?? \Video.dateAdded)
+        let descending = (first?.order ?? .reverse) == .reverse
+        var result = videos
+        switch sort {
+        case .name:
+            result.sort { a, b in
+                let r = a.fileName.localizedStandardCompare(b.fileName)
+                return descending ? r == .orderedDescending : r == .orderedAscending
+            }
+        case .dateAdded:
+            result.sort { descending ? $0.dateAdded > $1.dateAdded : $0.dateAdded < $1.dateAdded }
+        case .duration:
+            result.sort { descending ? $0.sortableDuration > $1.sortableDuration : $0.sortableDuration < $1.sortableDuration }
+        case .fileSize:
+            result.sort { descending ? $0.fileSize > $1.fileSize : $0.fileSize < $1.fileSize }
+        case .rating:
+            result.sort { descending ? $0.rating > $1.rating : $0.rating < $1.rating }
+        case .resolution:
+            result.sort { a, b in
+                if a.sortableResolutionHeight != b.sortableResolutionHeight {
+                    return descending
+                        ? a.sortableResolutionHeight > b.sortableResolutionHeight
+                        : a.sortableResolutionHeight < b.sortableResolutionHeight
+                }
+                return descending
+                    ? a.sortablePixelCount > b.sortablePixelCount
+                    : a.sortablePixelCount < b.sortablePixelCount
+            }
+        }
+        return result
+    }
+
     private nonisolated static func computeFilteredResult(snapshot: FilterSnapshot, collectionRepo: CollectionRepository) -> (videos: [Video], tagCounts: [Int64: Int]) {
         func isCorrupt(_ video: Video) -> Bool {
             video.duration == nil && video.width == nil && video.height == nil
@@ -1105,13 +1149,9 @@ final class LibraryViewModel {
             if rules.isEmpty {
                 return ([], [:])
             }
+            let matcher = collectionRepo.compile(rules: rules, mode: collection.matchMode)
             baseResult = baseResult.filter { video in
-                collectionRepo.matchesRules(
-                    video: video,
-                    rules: rules,
-                    tags: snapshot.tagsByVideoId[video.databaseId ?? -1] ?? [],
-                    mode: collection.matchMode
-                )
+                matcher.matches(video, tags: snapshot.tagsByVideoId[video.databaseId ?? -1] ?? [])
             }
         default:
             break
@@ -1140,7 +1180,7 @@ final class LibraryViewModel {
                 (snapshot.recentlyConvertedDates[$1.filePath] ?? .distantPast)
             }
         } else {
-            result.sort(using: snapshot.tableSortOrder)
+            result = Self.sortByTableOrder(result, comparators: snapshot.tableSortOrder)
         }
         return (result, tagCounts)
     }
@@ -2261,23 +2301,28 @@ final class LibraryViewModel {
     }
 
     func refreshCollectionCounts() async {
+        // Snapshot main-actor state, then compute the O(videos × collections × rules) loop off the main
+        // actor — it was a ~180ms main-thread stall at 12k. Result is assigned back on the main actor.
         let baseVideos = excludeCorrupt ? videos.filter { !Self.isCorrupt($0, thumbnailsSettled: thumbnailsSettled) } : videos
         let currentTags = tagsByVideoId
         let allRules = cachedCollectionRules
-        var counts: [Int64: Int] = [:]
-        for collection in collections {
-            guard let id = collection.id else { continue }
-            let rules = allRules[id] ?? []
-            if rules.isEmpty { continue }
-            counts[id] = baseVideos.filter { video in
-                collectionRepo.matchesRules(
-                    video: video,
-                    rules: rules,
-                    tags: currentTags[video.databaseId ?? -1] ?? [],
-                    mode: collection.matchMode
-                )
-            }.count
-        }
+        let cols = collections
+        let repo = collectionRepo
+
+        let counts = await Task.detached(priority: .utility) {
+            var counts: [Int64: Int] = [:]
+            for collection in cols {
+                guard let id = collection.id else { continue }
+                let rules = allRules[id] ?? []
+                if rules.isEmpty { continue }
+                let matcher = repo.compile(rules: rules, mode: collection.matchMode)
+                counts[id] = baseVideos.filter { video in
+                    matcher.matches(video, tags: currentTags[video.databaseId ?? -1] ?? [])
+                }.count
+            }
+            return counts
+        }.value
+
         collectionCounts = counts
     }
 

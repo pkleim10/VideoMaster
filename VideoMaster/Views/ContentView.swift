@@ -20,7 +20,6 @@ private struct LibraryContentView: View {
     @Bindable var vm: LibraryViewModel
     let thumbService: ThumbnailService
     /// Persists across content host rootView replacements (playback/browsing switch, layout changes).
-    @State private var gridScrollPositionId: String?
     @State private var listScrollPositionRow: Int?
     /// Must remove when the view goes away; repeated `onAppear` without removal stacks monitors and breaks handling.
     @State private var keyDownMonitor: Any?
@@ -207,8 +206,7 @@ private struct LibraryContentView: View {
             if vm.viewMode == .grid {
                 LibraryGridView(
                     viewModel: vm,
-                    thumbnailService: thumbService,
-                    scrollPositionId: $gridScrollPositionId
+                    thumbnailService: thumbService
                 )
             } else {
                 LibraryListView(

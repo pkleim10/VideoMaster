@@ -83,92 +83,135 @@ struct CollectionRepository {
 // MARK: - Rule Matching Engine
 
 extension CollectionRepository {
-    func matchesRules(video: Video, rules: [CollectionRule], tags: [Tag], mode: MatchMode) -> Bool {
-        switch mode {
-        case .all:
-            return rules.allSatisfy { rule in matchesRule(video: video, rule: rule, tags: tags) }
-        case .any:
-            return rules.contains { rule in matchesRule(video: video, rule: rule, tags: tags) }
+    /// A rule set compiled once into per-rule predicates. Rule values are parsed, comparison strings
+    /// lowercased, and regexes compiled a single time here — the old per-video path re-did all of that on
+    /// every one of ~12k calls (~90ms/rule). Build once per rule set, then evaluate per video.
+    struct CompiledMatcher {
+        fileprivate let mode: MatchMode
+        fileprivate let predicates: [(Video, [Tag]) -> Bool]
+
+        func matches(_ video: Video, tags: [Tag]) -> Bool {
+            switch mode {
+            case .all: return predicates.allSatisfy { $0(video, tags) }
+            case .any: return predicates.contains { $0(video, tags) }
+            }
         }
+    }
+
+    func compile(rules: [CollectionRule], mode: MatchMode) -> CompiledMatcher {
+        CompiledMatcher(mode: mode, predicates: rules.map { Self.compileRule($0) })
+    }
+
+    // Back-compat single-video entry points (used outside the hot filter loops). They delegate to a one-off
+    // compiled matcher so all rule evaluation shares one implementation.
+    func matchesRules(video: Video, rules: [CollectionRule], tags: [Tag], mode: MatchMode) -> Bool {
+        compile(rules: rules, mode: mode).matches(video, tags: tags)
     }
 
     func matchesAllRules(video: Video, rules: [CollectionRule], tags: [Tag]) -> Bool {
-        rules.allSatisfy { rule in matchesRule(video: video, rule: rule, tags: tags) }
+        compile(rules: rules, mode: .all).matches(video, tags: tags)
     }
 
-    private func matchesRule(video: Video, rule: CollectionRule, tags: [Tag]) -> Bool {
-        let attribute = rule.attribute
-        let comparison = rule.comparison
-        let value = rule.value
+    // MARK: - Rule compilation
 
-        switch attribute {
+    /// Precomputes everything that doesn't depend on the video (parsed numbers, lowercased strings, compiled
+    /// regex / date) once, returning a closure evaluated per video.
+    private static func compileRule(_ rule: CollectionRule) -> (Video, [Tag]) -> Bool {
+        let cmp = rule.comparison
+        let raw = rule.value
+
+        switch rule.attribute {
         case .name:
-            return compareString(video.fileName, comparison, value)
-        case .fileExtension:
-            let ext = video.url.pathExtension
-            return compareString(ext, comparison, value)
+            let m = StringMatcher(cmp, raw); return { v, _ in m.matches(v.fileName) }
         case .path:
-            return compareString(video.filePath, comparison, value)
+            let m = StringMatcher(cmp, raw); return { v, _ in m.matches(v.filePath) }
+        case .fileExtension:
+            let m = StringMatcher(cmp, raw); return { v, _ in m.matches((v.filePath as NSString).pathExtension) }
         case .parentFolder:
-            let parent = video.url.deletingLastPathComponent().lastPathComponent
-            return compareString(parent, comparison, value)
+            let m = StringMatcher(cmp, raw)
+            return { v, _ in
+                let parent = ((v.filePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+                return m.matches(parent)
+            }
         case .volume:
-            let components = video.url.pathComponents
-            let vol = components.count >= 3 && components[0] == "/" && components[1] == "Volumes"
-                ? components[2]
-                : "/"
-            return compareString(vol, comparison, value)
-        case .fileSize:
-            let mb = Double(value) ?? 0
-            let bytes = Int64(mb * 1_000_000)
-            return compareNumeric(video.fileSize, comparison, bytes)
-        case .duration:
-            guard let dur = video.duration else { return false }
-            let seconds = (Double(value) ?? 0) * 60
-            return compareNumeric(dur, comparison, seconds)
-        case .height:
-            guard let h = video.height else { return false }
-            let val = Int(value) ?? 0
-            return compareNumeric(h, comparison, val)
-        case .width:
-            guard let w = video.width else { return false }
-            let val = Int(value) ?? 0
-            return compareNumeric(w, comparison, val)
+            let m = StringMatcher(cmp, raw)
+            return { v, _ in
+                let comps = (v.filePath as NSString).pathComponents
+                let vol = comps.count >= 3 && comps[0] == "/" && comps[1] == "Volumes" ? comps[2] : "/"
+                return m.matches(vol)
+            }
         case .codec:
-            return compareString(video.codec ?? "", comparison, value)
-        case .dateImported:
-            return compareDate(video.dateAdded, comparison, value)
-        case .dateCreated:
-            guard let date = video.creationDate else { return false }
-            return compareDate(date, comparison, value)
-        case .playCount:
-            let val = Int(value) ?? 0
-            return compareNumeric(video.playCount, comparison, val)
-        case .rating:
-            let val = Int(value) ?? 0
-            return compareNumeric(video.rating, comparison, val)
+            let m = StringMatcher(cmp, raw); return { v, _ in m.matches(v.codec ?? "") }
         case .tag:
-            let tagNames = tags.map { $0.name }
-            return tagNames.contains { compareString($0, comparison, value) }
+            let m = StringMatcher(cmp, raw); return { _, tags in tags.contains { m.matches($0.name) } }
+        case .fileSize:
+            let bytes = Int64((Double(raw) ?? 0) * 1_000_000)
+            return { v, _ in compareNumeric(v.fileSize, cmp, bytes) }
+        case .duration:
+            let seconds = (Double(raw) ?? 0) * 60
+            return { v, _ in
+                guard let dur = v.duration else { return false }
+                return compareNumeric(dur, cmp, seconds)
+            }
+        case .height:
+            let val = Int(raw) ?? 0
+            return { v, _ in
+                guard let h = v.height else { return false }
+                return compareNumeric(h, cmp, val)
+            }
+        case .width:
+            let val = Int(raw) ?? 0
+            return { v, _ in
+                guard let w = v.width else { return false }
+                return compareNumeric(w, cmp, val)
+            }
+        case .playCount:
+            let val = Int(raw) ?? 0
+            return { v, _ in compareNumeric(v.playCount, cmp, val) }
+        case .rating:
+            let val = Int(raw) ?? 0
+            return { v, _ in compareNumeric(v.rating, cmp, val) }
+        case .dateImported:
+            let bound = parseRuleDay(raw)
+            return { v, _ in compareDay(v.dateAdded, cmp, bound) }
+        case .dateCreated:
+            let bound = parseRuleDay(raw)
+            return { v, _ in
+                guard let date = v.creationDate else { return false }
+                return compareDay(date, cmp, bound)
+            }
         }
     }
 
-    private func compareString(_ lhs: String, _ op: RuleComparison, _ rhs: String) -> Bool {
-        let l = lhs.lowercased()
-        let r = rhs.lowercased()
-        switch op {
-        case .equals: return l == r
-        case .notEquals: return l != r
-        case .contains: return l.contains(r)
-        case .startsWith: return l.hasPrefix(r)
-        case .endsWith: return l.hasSuffix(r)
-        case .matches:
-            return (try? Regex(rhs, as: Substring.self)).map { l.contains($0) } ?? false
-        default: return false
+    /// String comparison with the rule value lowercased / regex compiled up front (once per rule).
+    private struct StringMatcher {
+        let op: RuleComparison
+        let rhsLower: String
+        let regex: Regex<Substring>?
+
+        init(_ op: RuleComparison, _ rhs: String) {
+            self.op = op
+            self.rhsLower = rhs.lowercased()
+            self.regex = op == .matches ? (try? Regex(rhs, as: Substring.self)) : nil
+        }
+
+        func matches(_ lhs: String) -> Bool {
+            let l = lhs.lowercased()
+            switch op {
+            case .equals: return l == rhsLower
+            case .notEquals: return l != rhsLower
+            case .contains: return l.contains(rhsLower)
+            case .startsWith: return l.hasPrefix(rhsLower)
+            case .endsWith: return l.hasSuffix(rhsLower)
+            case .matches:
+                guard let regex else { return false }
+                return l.contains(regex)
+            default: return false
+            }
         }
     }
 
-    private func compareNumeric<T: Comparable>(_ lhs: T, _ op: RuleComparison, _ rhs: T) -> Bool {
+    private static func compareNumeric<T: Comparable>(_ lhs: T, _ op: RuleComparison, _ rhs: T) -> Bool {
         switch op {
         case .equals: return lhs == rhs
         case .notEquals: return lhs != rhs
@@ -180,12 +223,16 @@ extension CollectionRepository {
         }
     }
 
-    private func compareDate(_ lhs: Date, _ op: RuleComparison, _ dateString: String) -> Bool {
+    private static func parseRuleDay(_ dateString: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
-        guard let rhs = formatter.date(from: dateString) else { return false }
+        guard let date = formatter.date(from: dateString) else { return nil }
+        return Calendar.current.startOfDay(for: date)
+    }
+
+    private static func compareDay(_ lhs: Date, _ op: RuleComparison, _ rhsDay: Date?) -> Bool {
+        guard let rhsDay else { return false }
         let lhsDay = Calendar.current.startOfDay(for: lhs)
-        let rhsDay = Calendar.current.startOfDay(for: rhs)
         switch op {
         case .equals: return lhsDay == rhsDay
         case .lessThan: return lhsDay < rhsDay

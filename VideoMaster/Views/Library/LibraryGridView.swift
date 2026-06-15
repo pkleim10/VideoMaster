@@ -53,7 +53,6 @@ struct ScrollbarEnabler: NSViewRepresentable {
 struct LibraryGridView: View {
     @Bindable var viewModel: LibraryViewModel
     let thumbnailService: ThumbnailService
-    @Binding var scrollPositionId: String?
     /// Anchor for shift‑range selection (id avoids `ForEach(Array(enumerated()))` on 10k+ libraries).
     @State private var lastClickedVideoId: String?
     @State private var filmstripVideo: Video?
@@ -104,20 +103,38 @@ struct LibraryGridView: View {
                         .background(ScrollbarEnabler())
                         .background(ScrollCommandHandler(command: viewModel.scrollCommand, mode: .grid))
                     }
-                    .scrollPosition(id: $scrollPositionId, anchor: .center)
                     .onChange(of: viewModel.scrollToVideoId, initial: true) { _, targetId in
                         guard let id = targetId else { return }
                         viewModel.scrollToVideoId = nil
-                        guard viewModel.filteredVideos.contains(where: { $0.id == id }) else { return }
-                        // Defer so lazy layout settles; `.center` aligns the targeted cell with viewport center.
-                        // Sync `scrollPositionId` so `scrollPosition(anchor: .center)` state matches programmatic scroll.
+                        let videos = viewModel.filteredVideos
+                        guard let index = videos.firstIndex(where: { $0.id == id }), !videos.isEmpty else { return }
+                        // Jump the underlying NSScrollView (O(1)) rather than SwiftUI `proxy.scrollTo`, which
+                        // instantiates every intermediate cell down to a deep target — the source of the
+                        // multi-second freeze + thumbnail backlog when sorting/Surprise Me targets a far row.
+                        let columns = max(1, cols.count)
+                        let rowIndex = index / columns
+                        let totalRows = (videos.count + columns - 1) / columns
                         Task { @MainActor in
                             try? await Task.sleep(for: .milliseconds(120))
-                            scrollPositionId = id
-                            proxy.scrollTo(id, anchor: .center)
-                            try? await Task.sleep(for: .milliseconds(100))
-                            scrollPositionId = id
-                            proxy.scrollTo(id, anchor: .center)
+                            viewModel.issueScrollCommand(.toRow(index: rowIndex, total: totalRows))
+                        }
+                    }
+                    .onAppear {
+                        // Restore the selection's position on a List→Grid switch by jumping the underlying
+                        // NSScrollView directly (O(1)) instead of SwiftUI's `scrollPosition`, which forces
+                        // instantiation of every intermediate cell down to a deep selection (the ~6s freeze).
+                        guard viewModel.scrollToSelectedOnViewSwitch,
+                              let id = viewModel.selectedVideoIds.first else { return }
+                        viewModel.scrollToSelectedOnViewSwitch = false
+                        let videos = viewModel.filteredVideos
+                        guard let index = videos.firstIndex(where: { $0.id == id }), !videos.isEmpty else { return }
+                        let columns = max(1, cols.count)
+                        let rowIndex = index / columns
+                        let totalRows = (videos.count + columns - 1) / columns
+                        // Defer so the NSScrollView is in the hierarchy for ScrollCommandHandler to find.
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(120))
+                            viewModel.issueScrollCommand(.toRow(index: rowIndex, total: totalRows))
                         }
                     }
                 }
@@ -138,10 +155,6 @@ struct LibraryGridView: View {
             return .handled
         }
         .onAppear {
-            if viewModel.scrollToSelectedOnViewSwitch, let id = viewModel.selectedVideoIds.first {
-                viewModel.scrollToSelectedOnViewSwitch = false
-                scrollPositionId = id
-            }
             // Become key target after layout so arrow keys aren’t only handled by NSScrollView.
             DispatchQueue.main.async {
                 gridArrowKeyFocused = true
@@ -454,6 +467,9 @@ struct VideoGridCell: View {
     }
 
     private func loadThumbnail() async {
+        // Memory-cache hit is instant and main-safe. On a miss, decode off the main thread — so even when a
+        // scroll-to-selection on a List→Grid switch instantiates thousands of cells at once, the main thread
+        // never blocks on disk decode (that synchronous decode was the ~7s freeze).
         if let cached = thumbnailService.loadThumbnail(for: video.filePath) {
             thumbnail = cached
             return
