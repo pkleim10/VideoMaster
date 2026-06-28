@@ -23,7 +23,7 @@ struct TagChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.accentColor.opacity(0.12))
+        .background(Color.appAccent.opacity(0.18))
         .clipShape(Capsule())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
@@ -45,15 +45,15 @@ struct TagToggleChip: View {
             HStack(spacing: 4) {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
                     .font(.caption2)
-                    .foregroundStyle(isActive ? Color.white : .secondary)
+                    .foregroundStyle(isActive ? Color.white : Color.appTextSecondary)
                 Text(tag.name)
                     .font(.caption)
                     .fontWeight(isActive ? .semibold : .regular)
-                    .foregroundStyle(isActive ? Color.white : Color.primary)
+                    .foregroundStyle(isActive ? Color.white : Color.appTextPrimary)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(isActive ? Color.accentColor : Color.secondary.opacity(0.08))
+            .background(isActive ? Color.appAccent : Color.appSurface.opacity(0.6))
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -43,6 +43,8 @@ extension Video {
     var sortableCreationDate: TimeInterval { creationDate?.timeIntervalSinceReferenceDate ?? -1 }
     /// For list sort when `lastPlayed` is missing.
     var sortableLastPlayed: TimeInterval { lastPlayed?.timeIntervalSinceReferenceDate ?? -1 }
+    /// For consistency with other sortable fields (0 is valid and should sort low).
+    var sortablePlayCount: Int { playCount }
 
     var resolution: String? {
         guard let w = width, let h = height else { return nil }

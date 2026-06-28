@@ -98,6 +98,11 @@ struct LibraryGridView: View {
                                 }
                             }
                         }
+                        // Explicit spring so the pleasing "bounce" when switching grid densities (or when
+                        // the window width causes column count to change) is intentional and consistent.
+                        // We only key on gridSize here; pure width-driven reflows still get implicit layout
+                        // animation from the LazyVGrid.
+                        .animation(.spring(response: 0.38, dampingFraction: 0.80), value: viewModel.gridSize)
                         .padding(padding)
                         .scrollTargetLayout()
                         .background(ScrollbarEnabler())
@@ -348,42 +353,51 @@ struct VideoGridCell: View {
     @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: gridSize == .small ? 4 : 8) {
+        VStack(alignment: .leading, spacing: gridSize == .small ? AppSpacing.xs : AppSpacing.sm) {
+            // Thumbnail area with cinematic dark surface framing
             ZStack(alignment: .bottomTrailing) {
-                Color.clear
+                Color.appSurface
                     .frame(height: gridSize.thumbnailHeight)
                     .overlay {
                         thumbnailImage
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: gridSize == .small ? 4 : 8))
+                    .appMediaFrame(cornerRadius: gridSize == .small ? AppRadius.sm : AppRadius.md)
+                    .overlay(
+                        // When selected, give the video content a stronger blue accent ring so it "pops".
+                        isSelected
+                            ? RoundedRectangle(cornerRadius: gridSize == .small ? AppRadius.sm : AppRadius.md, style: .continuous)
+                                .stroke(Color.appAccent, lineWidth: 2)
+                            : nil
+                    )
 
                 if let duration = video.formattedDuration {
                     Text(duration)
-                        .font(gridSize == .small ? .system(size: 9) : .caption2)
+                        .font(gridSize == .small ? .system(size: 9) : Font.appCaption2)
                         .fontWeight(.medium)
                         .monospacedDigit()
-                        .padding(.horizontal, gridSize == .small ? 3 : 6)
+                        .padding(.horizontal, gridSize == .small ? AppSpacing.xxs : AppSpacing.xs)
                         .padding(.vertical, gridSize == .small ? 1 : 2)
-                        .background(.black.opacity(0.75))
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .padding(gridSize == .small ? 3 : 6)
+                        .background(Color.appBadgeBackground)
+                        .foregroundStyle(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
+                        .padding(gridSize == .small ? AppSpacing.xxs : AppSpacing.xs)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                 if isRenaming {
                     TextField("", text: $renameText)
                         .textFieldStyle(.plain)
-                        .font(gridSize == .small ? .system(size: 10) : .caption)
+                        .font(gridSize == .small ? .system(size: 10) : Font.appCaption)
                         .fontWeight(.medium)
                         .lineLimit(1)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(Color(nsColor: .textBackgroundColor))
+                        .padding(.horizontal, AppSpacing.xs)
+                        .padding(.vertical, AppSpacing.xxs)
+                        .background(Color.appSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 3)
-                                .stroke(Color.accentColor, lineWidth: 2)
+                            RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                                .stroke(Color.appAccent, lineWidth: 1.5)
                         )
                         .focused(renameFocus)
                         .onSubmit { onCommitRename() }
@@ -396,24 +410,26 @@ struct VideoGridCell: View {
                         }
                 } else {
                     Text(video.fileName)
-                        .font(gridSize == .small ? .system(size: 10) : .caption)
-                        .fontWeight(.medium)
+                        .font(gridSize == .small ? .system(size: 10) : Font.appCaption)
+                        .fontWeight(isSelected ? .semibold : .medium)
+                        .foregroundStyle(Color.appTextPrimary)
                         .lineLimit(gridSize == .small ? 1 : 2)
                 }
 
                 if gridSize != .small {
-                    HStack(spacing: 6) {
+                    HStack(spacing: AppSpacing.xs) {
                         if let res = video.resolutionLabel {
                             Text(res)
-                                .font(.caption2)
-                                .padding(.horizontal, 4)
+                                .font(Font.appCaption2)
+                                .padding(.horizontal, AppSpacing.xxs)
                                 .padding(.vertical, 1)
-                                .background(Color.secondary.opacity(0.15))
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .background(Color.appSurface)
+                                .foregroundStyle(Color.appAccent)
+                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
                         }
                         Text(video.formattedFileSize)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(Font.appCaption2)
+                            .foregroundStyle(Color.appTextSecondary)
                         Spacer()
                         if video.rating > 0 {
                             HStack(spacing: 1) {
@@ -428,19 +444,8 @@ struct VideoGridCell: View {
                 }
             }
         }
-        .padding(gridSize == .small ? 4 : 8)
-        .background(
-            RoundedRectangle(cornerRadius: gridSize == .small ? 6 : 10)
-                .fill(
-                    isSelected
-                        ? Color.accentColor.opacity(0.2)
-                        : (isHovering ? Color.primary.opacity(0.04) : Color.clear)
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: gridSize == .small ? 6 : 10)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-        )
+        .padding(gridSize == .small ? AppSpacing.xs : AppSpacing.md)
+        .appVideoGridCell(isSelected: isSelected, isHovering: isHovering, size: gridSize)
         .onHover { hovering in
             isHovering = hovering
         }
@@ -457,11 +462,11 @@ struct VideoGridCell: View {
                 .aspectRatio(contentMode: .fill)
         } else {
             Rectangle()
-                .fill(Color.secondary.opacity(0.1))
+                .fill(Color.appSurface)
                 .overlay {
                     Image(systemName: "film")
                         .font(gridSize == .small ? .caption : .title2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextTertiary)
                 }
         }
     }

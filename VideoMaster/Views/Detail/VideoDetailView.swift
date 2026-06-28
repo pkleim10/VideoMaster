@@ -54,47 +54,56 @@ struct VideoDetailView: View {
             let thumbnailHeight = max(100, totalHeight - clampedDetailHeight - handleHeight)
 
             VStack(spacing: 0) {
+                // Aggressive hero preview container for filmstrip/thumbnail/player
                 VStack(spacing: 0) {
                     if !detailShowsPlayer, (detailThumbnailLo != nil || detailThumbnailHi != nil || filmstrip != nil) {
-                        Picker("", selection: $viewModel.showThumbnailInDetail) {
-                            Text("Thumbnail").tag(true)
-                            Text("Filmstrip").tag(false)
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .frame(width: 160)
-                        .help("Switch preview type (⌥⌘F)")
-                        .padding(.top, 8)
-                        .padding(.bottom, 4)
+                        // Styled picker bar — part of the hero treatment
+                        HStack {
+                            AppSegmentedControl(
+                                selection: $viewModel.showThumbnailInDetail,
+                                items: [true, false]
+                            ) { showThumb in
+                                Text(showThumb ? "Thumbnail" : "Filmstrip")
+                            }
+                            .frame(width: 170)
+                            .help("Switch preview type (⌥⌘F)")
 
-                        if !viewModel.showThumbnailInDetail, filmstrip != nil {
-                            Text("Click any frame to start playback from that point")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.bottom, 4)
+                            if !viewModel.showThumbnailInDetail, filmstrip != nil {
+                                Text("Click any frame to start playback from that point")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.appTextSecondary)
+                            }
                         }
+                        .padding(.horizontal, AppSpacing.lg)
+                        .padding(.top, AppSpacing.md)
+                        .padding(.bottom, AppSpacing.sm)
                     }
 
                     thumbnailSection(maxHeight: thumbnailHeight)
                         .frame(maxHeight: .infinity)
-                        .padding(.horizontal)
-                        .padding(.top, 4)
+                        .padding(.horizontal, AppSpacing.lg)
+                        .padding(.bottom, AppSpacing.lg)
                 }
                 .frame(height: thumbnailHeight)
+                .appHeroPreview()
 
                 resizeHandle(totalHeight: totalHeight)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: AppSpacing.lg) {
                         titleSection
                         Divider()
+                            .overlay(Color.appDivider)
                         detailsAndAttributesRow
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom)
+                    .padding(.horizontal, AppSpacing.lg)
+                    .padding(.vertical, AppSpacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(height: clampedDetailHeight)
+                .background(Color.appBackground)
             }
+            .background(Color.appBackground)
             .onAppear {
                 detailPaneSize = geo.size
                 scheduleAutoAdjustVideoPane()
@@ -181,7 +190,7 @@ struct VideoDetailView: View {
         Image(nsImage: filmstrip)
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .appMediaFrame(cornerRadius: AppRadius.lg)
             .onHover { hovering in
                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
@@ -209,27 +218,34 @@ struct VideoDetailView: View {
                     .aspectRatio(contentMode: .fit)
             } else {
                 Rectangle()
-                    .fill(Color.secondary.opacity(0.1))
+                    .fill(Color.appSurface)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
             }
-            VStack(spacing: 8) {
+            VStack(spacing: AppSpacing.sm) {
                 Text("Playing full screen")
                     .font(.headline)
+                    .foregroundStyle(Color.appTextPrimary)
                 Text("Close the player window to stop.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
             .multilineTextAlignment(.center)
-            .padding()
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .padding(AppSpacing.md)
+            .background(Material.appSubtleGlass, in: RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
         }
     }
 
     private func resizeHandle(totalHeight: CGFloat) -> some View {
         Rectangle()
-            .fill(Color.clear)
+            .fill(Color.appAccent.opacity(0.25))
             .frame(height: 8)
             .contentShape(Rectangle())
+            .overlay(
+                Rectangle()
+                    .fill(Color.appAccent)
+                    .frame(width: 60, height: 2)
+                    .cornerRadius(1)
+            )
             .onHover { hovering in
                 if hovering { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
             }
@@ -264,7 +280,7 @@ struct VideoDetailView: View {
                     if fullscreenInlineController != nil {
                         fullscreenPlaybackPlaceholder
                             .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .appMediaFrame(cornerRadius: AppRadius.lg)
                     } else {
                         ZStack {
                             FloatingPlayerView(player: player)
@@ -281,18 +297,18 @@ struct VideoDetailView: View {
                                     }
                                 }
                                 .opacity(resumeBannerOpacity)
-                                .padding(10)
+                                .padding(AppSpacing.sm)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             }
                         }
                         .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .appMediaFrame(cornerRadius: AppRadius.lg)
                     }
                 } else if preferThumbnail, let detailStill {
                     Image(nsImage: detailStill)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .appMediaFrame(cornerRadius: AppRadius.lg)
                 } else if let filmstrip {
                     filmstripImage(filmstrip)
                 } else if let detailStill {
@@ -301,16 +317,16 @@ struct VideoDetailView: View {
                     Image(nsImage: detailStill)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .appMediaFrame(cornerRadius: AppRadius.lg)
                 } else {
                     Rectangle()
-                        .fill(Color.secondary.opacity(0.1))
+                        .fill(Color.appSurface)
                         .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .appMediaFrame(cornerRadius: AppRadius.lg)
                         .overlay {
                             Image(systemName: "film")
                                 .font(.system(size: 48))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.appTextTertiary)
                         }
                 }
         if let errorMsg = inlinePlayerError {
@@ -520,59 +536,64 @@ struct VideoDetailView: View {
     }
 
     private func resumeOverlay(resumedFromSeconds: Double, startAtBeginning: @escaping () -> Void) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AppSpacing.sm) {
             Text("Resumed at \(formatTimestamp(resumedFromSeconds))")
                 .font(.caption)
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.appTextPrimary)
             Button("Start at beginning", action: startAtBeginning)
                 .font(.caption)
                 .buttonStyle(.borderedProminent)
+                .tint(Color.appAccent)
                 .controlSize(.small)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, AppSpacing.sm)
+        .background(Material.appFloatingMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .strokeBorder(Color.appAccent.opacity(0.35), lineWidth: 1)
         )
+        .appElevation(.subtle)
     }
 
     private func inlinePlayerErrorOverlay(_ message: String) -> some View {
         ZStack {
-            Color.black.opacity(0.55)
-            VStack(spacing: 12) {
+            Color.black.opacity(0.65)
+            VStack(spacing: AppSpacing.lg) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 30))
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(Color.appAccentLight)
                 Text("Playback Failed")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.appTextPrimary)
                 Text(message)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Color.appTextSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)
-                HStack(spacing: 10) {
+                HStack(spacing: AppSpacing.md) {
                     Button("Open in External Player") {
                         inlinePlayerError = nil
                         NSWorkspace.shared.open(video.url)
                         Task { await viewModel.recordPlay(for: video) }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(Color.appAccent)
                     .controlSize(.small)
                     Button("Dismiss") {
                         inlinePlayerError = nil
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.appTextSecondary)
                 }
             }
-            .padding()
+            .padding(AppSpacing.lg)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(Material.appFloatingMaterial, in: RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+        .appElevation(.floating)
     }
 
     private func formatTimestamp(_ seconds: Double) -> String {
@@ -626,12 +647,12 @@ struct VideoDetailView: View {
     // MARK: - Title
 
     private var titleSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             if isMultiSelect {
                 Text("\(selectedIds.count) Videos Selected")
                     .font(.title2)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             } else {
                 if isEditingName {
                     TextField("File name", text: $editedName)
@@ -644,6 +665,7 @@ struct VideoDetailView: View {
                     Text(video.fileName)
                         .font(.title2)
                         .fontWeight(.semibold)
+                        .foregroundStyle(Color.appTextPrimary)
                         .onTapGesture {
                             editedName = video.fileName
                             isEditingName = true
@@ -653,13 +675,14 @@ struct VideoDetailView: View {
 
                 Text(video.filePath)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
                     .textSelection(.enabled)
                     .lineLimit(2)
 
-                HStack(spacing: 12) {
+                HStack(spacing: AppSpacing.md) {
                     Button("Play Video") { playVideo() }
                         .buttonStyle(.borderedProminent)
+                        .tint(Color.appAccent)
                         .controlSize(.small)
 
                     Button("Show in Finder") {
@@ -669,9 +692,12 @@ struct VideoDetailView: View {
 
                     subtitleControls
                 }
-                .padding(.top, 4)
+                .padding(.top, AppSpacing.xs)
             }
         }
+        .padding(.vertical, AppSpacing.sm)
+        .padding(.horizontal, AppSpacing.sm)
+        .background(Color.appSurface.opacity(0.6), in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
     }
 
     // MARK: - Subtitles
@@ -690,6 +716,7 @@ struct VideoDetailView: View {
                     .labelStyle(.iconOnly)
             }
             .toggleStyle(.button)
+            .tint(Color.appAccent)
             .controlSize(.small)
             .help(subtitleTrack.isEnabled
                 ? "Subtitles on (\(subtitleTrack.sourceURL?.lastPathComponent ?? "SRT"))"
@@ -703,6 +730,7 @@ struct VideoDetailView: View {
                 .labelStyle(.iconOnly)
         }
         .buttonStyle(.bordered)
+        .tint(Color.appAccent)
         .controlSize(.small)
         .help("Load a subtitle file (.srt) for this video")
     }
@@ -730,11 +758,15 @@ struct VideoDetailView: View {
     // MARK: - Details (left 2/3) + Rating & Tags (right 1/3)
 
     private var detailsAndAttributesRow: some View {
-        HStack(alignment: .top, spacing: 20) {
+        HStack(alignment: .top, spacing: AppSpacing.xxl) {
             metadataSection
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Divider()
+            // Stronger visual separator
+            Rectangle()
+                .fill(Color.appAccent.opacity(0.25))
+                .frame(width: 1)
+                .frame(maxHeight: .infinity)
 
             ratingAndTagsSection
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -745,15 +777,23 @@ struct VideoDetailView: View {
     // MARK: - Metadata
 
     private var metadataSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Details")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: AppSpacing.lg) {
+            // Aggressive header with left accent bar
+            HStack(spacing: AppSpacing.sm) {
+                Rectangle()
+                    .fill(Color.appAccent)
+                    .frame(width: 4, height: 18)
+                    .cornerRadius(2)
+                Text("Details")
+                    .font(.headline)
+                    .foregroundStyle(Color.appAccent)
+            }
 
             if isMultiSelect {
                 let vids = selectedVideos
                 LazyVGrid(
                     columns: [GridItem(.flexible()), GridItem(.flexible())],
-                    alignment: .leading, spacing: 10
+                    alignment: .leading, spacing: AppSpacing.md
                 ) {
                     MetadataRow(label: "Resolution", value: {
                         if let outer = commonOptionalValue(\.resolution), let res = outer { return res }
@@ -802,7 +842,7 @@ struct VideoDetailView: View {
             } else {
                 LazyVGrid(
                     columns: [GridItem(.flexible()), GridItem(.flexible())],
-                    alignment: .leading, spacing: 10
+                    alignment: .leading, spacing: AppSpacing.md
                 ) {
                     MetadataRow(label: "Resolution", value: video.resolution ?? "Unknown")
                     MetadataRow(
@@ -838,9 +878,12 @@ struct VideoDetailView: View {
 
             if !sortedCustomDefinitionFields.isEmpty {
                 Divider()
+                    .overlay(Color.appDivider)
                 customMetadataFieldsSection
             }
         }
+        .padding(AppSpacing.lg)
+        .appDetailCard()
     }
 
     private var sortedCustomDefinitionFields: [CustomMetadataFieldDefinition] {
@@ -857,9 +900,16 @@ struct VideoDetailView: View {
     }
 
     private var customMetadataFieldsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Custom")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: AppSpacing.lg) {
+            HStack(spacing: AppSpacing.sm) {
+                Rectangle()
+                    .fill(Color.appAccent)
+                    .frame(width: 4, height: 18)
+                    .cornerRadius(2)
+                Text("Custom")
+                    .font(.headline)
+                    .foregroundStyle(Color.appAccent)
+            }
             ForEach(sortedCustomDefinitionFields) { field in
                 customMetadataFieldEditor(for: field)
             }
@@ -868,10 +918,10 @@ struct VideoDetailView: View {
 
     @ViewBuilder
     private func customMetadataFieldEditor(for field: CustomMetadataFieldDefinition) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             Text(field.name)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appTextSecondary)
             switch field.valueType {
             case .string:
                 customStringField(for: field)
@@ -890,7 +940,7 @@ struct VideoDetailView: View {
     private func customStringField(for field: CustomMetadataFieldDefinition) -> some View {
         Group {
             if customFieldVarious.contains(field.id) {
-                TextField("", text: customBinding(for: field), prompt: Text("Various").foregroundStyle(.tertiary))
+                TextField("", text: customBinding(for: field), prompt: Text("Various").foregroundStyle(Color.appTextTertiary))
                     .textFieldStyle(.roundedBorder)
             } else {
                 TextField("", text: customBinding(for: field))
@@ -906,16 +956,16 @@ struct VideoDetailView: View {
                 .frame(minHeight: 56, maxHeight: 120)
                 .scrollContentBackground(.hidden)
                 .padding(4)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .background(Color.appSurface)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                        .strokeBorder(Color.appDivider, lineWidth: 1)
                 }
             if customFieldVarious.contains(field.id), (customFieldValues[field.id] ?? "").isEmpty {
                 Text("Various")
                     .font(.callout)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.appTextTertiary)
                     .padding(.top, 12)
                     .padding(.leading, 10)
                     .allowsHitTesting(false)
@@ -926,7 +976,7 @@ struct VideoDetailView: View {
     private func customNumberField(for field: CustomMetadataFieldDefinition) -> some View {
         Group {
             if customFieldVarious.contains(field.id) {
-                TextField("", text: customNumberBinding(for: field), prompt: Text("Various").foregroundStyle(.tertiary))
+                TextField("", text: customNumberBinding(for: field), prompt: Text("Various").foregroundStyle(Color.appTextTertiary))
                     .textFieldStyle(.roundedBorder)
             } else {
                 TextField("", text: customNumberBinding(for: field))
@@ -941,7 +991,7 @@ struct VideoDetailView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Various")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextSecondary)
                     Button(includeTime ? "Set date & time…" : "Set date…") {
                         let now = Date()
                         let encoded = CustomMetadataDetailCodec.encodeDate(now, as: field.valueType)
@@ -1066,10 +1116,18 @@ struct VideoDetailView: View {
     // MARK: - Rating + Tags (combined right column)
 
     private var ratingAndTagsSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Rating")
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: AppSpacing.xxl) {
+            // Rating with left accent
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                HStack(spacing: AppSpacing.sm) {
+                    Rectangle()
+                        .fill(Color.appAccent)
+                        .frame(width: 4, height: 18)
+                        .cornerRadius(2)
+                    Text("Rating")
+                        .font(.headline)
+                        .foregroundStyle(Color.appAccent)
+                }
                 RatingView(rating: isMultiSelect ? (commonValue(\.rating) ?? 0) : resolvedVideo.rating, size: 20) { newRating in
                     let ids = selectedIds
                     viewModel.applyRating(to: ids, rating: newRating)
@@ -1078,15 +1136,24 @@ struct VideoDetailView: View {
             }
 
             Divider()
+                .overlay(Color.appDivider)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Tags")
-                    .font(.headline)
+            // Tags with left accent
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                HStack(spacing: AppSpacing.sm) {
+                    Rectangle()
+                        .fill(Color.appAccent)
+                        .frame(width: 4, height: 18)
+                        .cornerRadius(2)
+                    Text("Tags")
+                        .font(.headline)
+                        .foregroundStyle(Color.appAccent)
+                }
 
                 if viewModel.tags.isEmpty {
                     Text("No tags yet — create one below")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.appTextTertiary)
                 } else {
                     FlowLayout(spacing: 6) {
                         ForEach(sortedAlphaTags) { tag in
@@ -1096,9 +1163,10 @@ struct VideoDetailView: View {
                 }
 
                 Divider()
+                    .overlay(Color.appDivider)
 
                 if isCreatingTag {
-                    HStack(spacing: 4) {
+                    HStack(spacing: AppSpacing.xs) {
                         TextField("Tag name", text: $newTagName)
                             .textFieldStyle(.roundedBorder)
                             .controlSize(.small)
@@ -1119,7 +1187,7 @@ struct VideoDetailView: View {
                         .disabled(newTagName.trimmingCharacters(in: .whitespaces).isEmpty)
                         Button(action: { isCreatingTag = false; newTagName = "" }) {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.appTextSecondary)
                         }
                         .buttonStyle(.plain)
                     }
@@ -1129,10 +1197,12 @@ struct VideoDetailView: View {
                             .font(.caption)
                     }
                     .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
                 }
             }
         }
+        .padding(AppSpacing.lg)
+        .appDetailCard()
     }
 
     // MARK: - Actions
@@ -1495,13 +1565,15 @@ struct MetadataRow: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.appTextTertiary)
             Text(value)
-                .font(.callout)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(Color.appTextPrimary)
         }
+        .padding(.vertical, 2)
     }
 }
 

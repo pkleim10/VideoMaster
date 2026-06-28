@@ -73,7 +73,7 @@ struct LibrarySettingsView: View {
                     daysField(value: $viewModel.recentlyAddedDays)
                         .disabled(!viewModel.showRecentlyAdded)
                     Text("days")
-                        .foregroundStyle(viewModel.showRecentlyAdded ? .secondary : .tertiary)
+                        .foregroundStyle(viewModel.showRecentlyAdded ? Color.appTextSecondary : Color.appTextTertiary)
                 }
 
                 filterRow(
@@ -83,7 +83,7 @@ struct LibrarySettingsView: View {
                     daysField(value: $viewModel.recentlyPlayedDays)
                         .disabled(!viewModel.showRecentlyPlayed)
                     Text("days")
-                        .foregroundStyle(viewModel.showRecentlyPlayed ? .secondary : .tertiary)
+                        .foregroundStyle(viewModel.showRecentlyPlayed ? Color.appTextSecondary : Color.appTextTertiary)
                 }
 
                 filterRow(
@@ -159,7 +159,7 @@ struct VideoSettingsView: View {
                     Spacer()
                     Text("\(viewModel.defaultFilmstripRows * viewModel.defaultFilmstripColumns) frames per filmstrip")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextSecondary)
                 }
 
                 Button("Regenerate filmstrips") {
@@ -226,7 +226,7 @@ struct VideoSettingsView: View {
         VStack(spacing: 4) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appTextSecondary)
             HStack(spacing: 0) {
                 Button {
                     if value.wrappedValue > range.lowerBound { value.wrappedValue -= 1 }
@@ -268,7 +268,7 @@ struct ToolsSettingsView: View {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                         Text(resolved)
                             .font(.callout.monospaced())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appTextSecondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         if viewModel.ffmpegUserPath.isEmpty {
@@ -280,7 +280,7 @@ struct ToolsSettingsView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
                         Text(viewModel.ffmpegUserPath.isEmpty ? "Not found at standard paths" : "Not found at configured path")
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appTextSecondary)
                     }
                 }
 

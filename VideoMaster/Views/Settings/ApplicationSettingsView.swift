@@ -12,6 +12,7 @@ struct ApplicationSettingsView: View {
                     }
                 }
                 .pickerStyle(.inline)
+                .tint(Color.appAccent)
             } header: {
                 Text("Appearance")
             } footer: {

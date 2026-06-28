@@ -56,7 +56,7 @@ struct CollectionEditorView: View {
             HStack(spacing: 4) {
                 Text("Match videos where")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
 
                 Button(action: { withAnimation(.easeInOut(duration: 0.15)) { matchMode = matchMode == .all ? .any : .all } }) {
                     Text(matchMode == .all ? "ALL" : "ANY")
@@ -65,7 +65,7 @@ struct CollectionEditorView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
                         .background(
-                            Capsule().fill(matchMode == .all ? Color.accentColor : Color.orange)
+                            Capsule().fill(matchMode == .all ? Color.appAccent : Color.orange)
                         )
                         .foregroundColor(.white)
                 }
@@ -73,7 +73,7 @@ struct CollectionEditorView: View {
 
                 Text("of the following are true:")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
 
             ScrollView {

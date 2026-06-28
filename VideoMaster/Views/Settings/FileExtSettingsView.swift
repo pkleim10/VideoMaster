@@ -26,7 +26,7 @@ struct FileExtSettingsView: View {
                             manager.remove(entry.ext)
                         } label: {
                             Image(systemName: "minus.circle")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.appTextSecondary)
                         }
                         .buttonStyle(.borderless)
                     }

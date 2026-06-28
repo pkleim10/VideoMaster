@@ -36,21 +36,25 @@ struct ScrollCommandHandler: NSViewRepresentable {
         // Defer so any pending layout (version bump, column changes) settles before we read viewport metrics.
         DispatchQueue.main.async { [weak nsView] in
             guard let nsView, let scrollView = Self.locateScrollView(from: nsView, mode: mode) else { return }
-            Self.apply(kind, to: scrollView)
+            Self.apply(kind, to: scrollView, mode: mode)
         }
     }
 
     // MARK: - Scrolling
 
-    private static func apply(_ kind: LibraryViewModel.ScrollCommand.Kind, to scrollView: NSScrollView) {
+    private static func apply(_ kind: LibraryViewModel.ScrollCommand.Kind, to scrollView: NSScrollView, mode: Mode) {
         let clip = scrollView.contentView
         let insets = scrollView.contentInsets
         let clipH = clip.bounds.height
         let docHeight = scrollView.documentView?.bounds.height ?? clipH
-        // With a top content inset (e.g. content scrolling under the titlebar) the true top scroll position
-        // is `-insets.top`, not 0 — scrolling to 0 stops a fraction of a row short. Account for insets at
-        // both ends, and size a page off the *visible* height (clip minus insets).
-        let minY = -insets.top
+
+        // Top scroll position accounting for chrome vs. table headers.
+        // Grid: use negative inset so the content area can scroll under the titlebar area.
+        // List: we compute a dynamic "minY" for most operations (see scrollListToAbsoluteTop for .top).
+        //       The column header is a separate headerView; simply targeting y=0 or -insets.top can leave
+        //       the first row partially obscured if the clip view overlaps the header frame.
+        let minY: CGFloat = (mode == .list) ? 0 : -insets.top
+
         let maxY = max(minY, docHeight + insets.bottom - clipH)
         let visibleH = max(0, clipH - insets.top - insets.bottom)
         // Overlap ~one row's worth so content at the seam stays visible across a page jump.
@@ -58,7 +62,23 @@ struct ScrollCommandHandler: NSViewRepresentable {
         var y = clip.bounds.origin.y
 
         switch kind {
-        case .top: y = minY
+        case .top:
+            if mode == .list {
+                Self.scrollListToAbsoluteTop(scrollView)
+                // Re-apply shortly after; SwiftUI Table / NSTableView may perform additional layout or
+                // selection-visibility scrolls on the next tick(s) that would otherwise leave the first row
+                // partially under the column header.
+                DispatchQueue.main.async { [weak scrollView] in
+                    guard let sv = scrollView else { return }
+                    Self.scrollListToAbsoluteTop(sv)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak scrollView] in
+                    guard let sv = scrollView else { return }
+                    Self.scrollListToAbsoluteTop(sv)
+                }
+                return
+            }
+            y = minY
         case .bottom: y = maxY
         case .pageUp: y = max(minY, y - page)
         case .pageDown: y = min(maxY, y + page)
@@ -98,6 +118,98 @@ struct ScrollCommandHandler: NSViewRepresentable {
         default:
             break
         }
+    }
+
+    // MARK: - List top (precise under-header pinning)
+
+    /// Scrolls the list (NSTableView-backed) so that row 0 is positioned with its top edge exactly
+    /// visually flush under the column header (no gap, nothing hidden). We compute the required clip
+    /// origin by mapping the header's bottom edge into the clip view's local coordinate space and
+    /// solving for the document Y that should appear right at that "under-header" line.
+    private static func scrollListToAbsoluteTop(_ scrollView: NSScrollView) {
+        scrollView.layoutSubtreeIfNeeded()
+        let clip = scrollView.contentView
+        clip.layoutSubtreeIfNeeded()
+
+        guard let table = Self.findTableView(under: scrollView) else {
+            let target = NSPoint(x: clip.bounds.origin.x, y: 0)
+            clip.scroll(to: target)
+            scrollView.reflectScrolledClipView(clip)
+            return
+        }
+
+        table.layoutSubtreeIfNeeded()
+        if table.numberOfRows > 0 {
+            table.scrollRowToVisible(0)
+        }
+        table.layoutSubtreeIfNeeded()
+
+        let rowRect = (table.numberOfRows > 0) ? table.rect(ofRow: 0) : .zero
+        guard !rowRect.isEmpty else {
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: 0))
+            scrollView.reflectScrolledClipView(clip)
+            return
+        }
+
+        // Base target aligns row top to the top of the clip (document y = row top at clip local y=0).
+        var targetY = rowRect.minY
+
+        if let tableHeader = table.headerView {
+            tableHeader.layoutSubtreeIfNeeded()
+
+            // Convert the *bottom edge* of the header into the clip view's local coords.
+            // The Y value we get is the local point in the clip at which the header visually ends.
+            let headerBottomLocalInClip = tableHeader.convert(
+                NSPoint(x: 0, y: tableHeader.bounds.maxY),
+                to: clip
+            ).y
+
+            // Document point shown at local clip Y = L is: clip.bounds.origin.y + L
+            // We want rowRect.minY to be the document point shown at local Y = headerBottomLocalInClip.
+            // Therefore: clip.bounds.origin.y + headerBottomLocalInClip == rowRect.minY
+            targetY = rowRect.minY - headerBottomLocalInClip
+        }
+
+        let target = NSPoint(x: clip.bounds.origin.x, y: targetY)
+        clip.scroll(to: target)
+        scrollView.reflectScrolledClipView(clip)
+
+        // Immediate correction: a layout or selection-visibility pass can nudge the clip by a few points.
+        // Re-measure using the same header-to-clip mapping and correct if we're off by > 0.25 pt.
+        Self.correctListFirstRowUnderHeader(table: table, clip: clip, scrollView: scrollView)
+    }
+
+    /// After a scroll, re-compute the ideal clip origin using header-bottom → clip local mapping and
+    /// apply a micro-correction if the actual position drifted. This catches the last 1-4 px that
+    /// SwiftUI/AppKit sometimes reapplies right after we set the origin.
+    private static func correctListFirstRowUnderHeader(table: NSTableView, clip: NSClipView, scrollView: NSScrollView) {
+        table.layoutSubtreeIfNeeded()
+        clip.layoutSubtreeIfNeeded()
+        guard table.numberOfRows > 0 else { return }
+
+        let rowTopDoc = table.rect(ofRow: 0).minY
+        var desiredY = rowTopDoc
+
+        if let hdr = table.headerView {
+            hdr.layoutSubtreeIfNeeded()
+            let hb = hdr.convert(NSPoint(x: 0, y: hdr.bounds.maxY), to: clip).y
+            desiredY = rowTopDoc - hb
+        }
+
+        let currentY = clip.bounds.origin.y
+        if abs(currentY - desiredY) > 0.25 {
+            let corrected = NSPoint(x: clip.bounds.origin.x, y: desiredY)
+            clip.scroll(to: corrected)
+            scrollView.reflectScrolledClipView(clip)
+        }
+    }
+
+    private static func findTableView(under view: NSView) -> NSTableView? {
+        if let tv = view as? NSTableView { return tv }
+        for sub in view.subviews {
+            if let found = findTableView(under: sub) { return found }
+        }
+        return nil
     }
 
     // MARK: - Locating the scroll view

@@ -9,8 +9,10 @@ struct ContentView: View {
         if !appState.hasLibrary {
             LandingView()
                 .frame(minWidth: 900, minHeight: 600)
+                .appDesignSystem()
         } else if let vm = appState.libraryViewModel {
             LibraryContentView(vm: vm, thumbService: appState.thumbnailService)
+                .appDesignSystem()   // Injects VideoMaster design tokens + theme
         }
     }
 }
@@ -24,6 +26,7 @@ private struct LibraryContentView: View {
     /// Must remove when the view goes away; repeated `onAppear` without removal stacks monitors and breaks handling.
     @State private var keyDownMonitor: Any?
     @State private var showListColumnsSheet = false
+    @FocusState private var isSearchFocused: Bool
 
     /// The video shown in the detail pane / overlay (primary selection). Shared by `detailContent` and the overlay.
     private var selectedVideo: Video? {
@@ -131,36 +134,39 @@ private struct LibraryContentView: View {
     /// controls. Each scroll button hosts its keyboard shortcut; the per-view `ScrollCommandHandler` scrolls.
     private var libraryNavBar: some View {
         HStack(spacing: 8) {
-            Picker("View Mode", selection: Binding(
-                get: { vm.viewMode },
-                set: { newValue in
-                    vm.viewMode = newValue
-                    vm.savePreferences()
-                    if !vm.selectedVideoIds.isEmpty {
-                        vm.scrollToSelectedOnViewSwitch = true
+            AppSegmentedControl(
+                selection: Binding(
+                    get: { vm.viewMode },
+                    set: { newValue in
+                        vm.viewMode = newValue
+                        vm.savePreferences()
+                        if !vm.selectedVideoIds.isEmpty {
+                            vm.scrollToSelectedOnViewSwitch = true
+                        }
                     }
+                ),
+                items: [ViewMode.list, .grid]
+            ) { mode in
+                switch mode {
+                case .list:
+                    Label("List", systemImage: "list.bullet")
+                case .grid:
+                    Label("Grid", systemImage: "square.grid.2x2")
                 }
-            )) {
-                Label("List", systemImage: "list.bullet")
-                    .tag(ViewMode.list)
-                Label("Grid", systemImage: "square.grid.2x2")
-                    .tag(ViewMode.grid)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 80)
 
             if vm.viewMode == .grid {
-                Picker("Grid Size", selection: $vm.gridSize) {
-                    ForEach(GridSize.allCases, id: \.self) { size in
-                        Text(size.label).tag(size)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 100)
-                .onChange(of: vm.gridSize) {
-                    vm.savePreferences()
+                AppSegmentedControl(
+                    selection: Binding(
+                        get: { vm.gridSize },
+                        set: { newValue in
+                            vm.gridSize = newValue
+                            vm.savePreferences()
+                        }
+                    ),
+                    items: GridSize.allCases
+                ) { size in
+                    Text(size.label)
                 }
                 .help("Thumbnail size")
             }
@@ -172,17 +178,47 @@ private struct LibraryContentView: View {
                     Label("Columns", systemImage: "tablecells")
                 }
                 .labelStyle(.iconOnly)
-                .buttonStyle(.bordered)
+                .appNavBarButton()
                 .help("Choose which columns appear in list view")
             }
 
             SortMenuButton(viewModel: vm)
-                .buttonStyle(.bordered)
+                .appNavBarButton()
                 .fixedSize()
+
+            // Custom search field (replaces stock .searchable for full Cinematic Blue styling)
+            HStack(spacing: AppSpacing.xs) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Color.appTextTertiary)
+                    .font(.callout)
+                TextField("Search videos", text: $vm.searchText)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(Color.appTextPrimary)
+                    .tint(Color.appAccent)
+                    .focused($isSearchFocused)
+                if !vm.searchText.isEmpty {
+                    Button {
+                        vm.searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Color.appTextTertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, AppSpacing.sm)
+            .padding(.vertical, 4)
+            .background(Color.appSurface.opacity(0.65))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .stroke(isSearchFocused ? Color.appAccent.opacity(0.55) : Color.appAccent.opacity(0.18), lineWidth: isSearchFocused ? 1.5 : 1)
+            )
+            .frame(minWidth: 160, idealWidth: 220)
 
             Spacer()
 
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Button { vm.issueScrollCommand(.top) } label: {
                     Image(systemName: "arrow.up.to.line")
                 }
@@ -207,12 +243,28 @@ private struct LibraryContentView: View {
                 .help("Go to bottom (⌘↓)")
                 .keyboardShortcut(.downArrow, modifiers: .command)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .padding(4)
+            .background(Color.appSurface.opacity(0.65))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    .stroke(Color.appAccent.opacity(0.25), lineWidth: 1)
+            )
             .disabled(vm.filteredVideos.isEmpty)
         }
-        .controlSize(.small)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .fill(Material.appSubtleGlass)
+                .background(Color.appSurface.opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .stroke(Color.appAccent.opacity(0.12), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
     }
 
     @ViewBuilder
@@ -260,11 +312,13 @@ private struct LibraryContentView: View {
                         Button(action: { vm.showFolderPicker() }) {
                             Label("Add Folder", systemImage: "folder.badge.plus")
                         }
+                        .tint(Color.appAccent)
                         .help("Add a folder of videos to your library")
 
                         Button(action: { Task { await vm.importNew() } }) {
                             Label("Import New", systemImage: "arrow.down.circle")
                         }
+                        .tint(Color.appAccent)
                         .disabled(vm.isScanning)
                         .help("Scan data sources for new video files")
 
@@ -273,24 +327,26 @@ private struct LibraryContentView: View {
                         }) {
                             Label("Surprise Me!", systemImage: "exclamationmark.circle.fill")
                         }
+                        .tint(Color.appAccent)
                         .disabled(vm.filteredVideos.isEmpty)
                         .help("Random video: filmstrip in detail first, then scroll list/grid to the selection")
 
-                        Picker("Playback Mode", selection: Binding(
-                            get: { vm.inlinePlaybackMode },
-                            set: { vm.setInlinePlaybackMode($0) }
-                        )) {
-                            Label("Detail Pane", systemImage: "rectangle.righthalf.inset.filled")
-                                .tag(InlinePlaybackMode.detailPane)
-                                .help("Play inline in the detail pane (⌥⌘1)")
-                            Label("Overlay", systemImage: "pip")
-                                .tag(InlinePlaybackMode.overlay)
-                                .help("Play in a floating overlay panel (⌥⌘2)")
-                            Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
-                                .tag(InlinePlaybackMode.fullScreen)
-                                .help("Play in a full-screen window (⌥⌘3)")
+                        AppSegmentedControl(
+                            selection: Binding(
+                                get: { vm.inlinePlaybackMode },
+                                set: { vm.setInlinePlaybackMode($0) }
+                            ),
+                            items: InlinePlaybackMode.allCases
+                        ) { mode in
+                            switch mode {
+                            case .detailPane:
+                                Label("Detail Pane", systemImage: "rectangle.righthalf.inset.filled")
+                            case .overlay:
+                                Label("Overlay", systemImage: "pip")
+                            case .fullScreen:
+                                Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
+                            }
                         }
-                        .pickerStyle(.segmented)
                         .labelStyle(.iconOnly)
                     }
                 }
@@ -326,7 +382,6 @@ private struct LibraryContentView: View {
                         }
                     }
                 }
-                .searchable(text: Binding(get: { vm.searchText }, set: { vm.searchText = $0 }), prompt: "Search videos")
                 .overlay {
                     if vm.videos.isEmpty && !vm.isScanning {
                         emptyStateView
@@ -346,10 +401,33 @@ private struct LibraryContentView: View {
             if let video = selectedVideo {
                 VideoDetailView(video: video, viewModel: vm, thumbnailService: thumbService)
             } else {
-                Text("Select a video")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: AppSpacing.lg) {
+                    Image(systemName: "film")
+                        .font(.system(size: 48))
+                        .foregroundStyle(Color.appTextTertiary)
+
+                    VStack(spacing: AppSpacing.xs) {
+                        Text("Select a video")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(Color.appTextPrimary)
+                        Text("Choose one from the library to view details and controls")
+                            .font(.callout)
+                            .foregroundStyle(Color.appTextSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .padding(AppSpacing.xxl)
+                .background(
+                    RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                        .fill(Material.appSubtleGlass)
+                        .background(Color.appSurface.opacity(0.65))
+                )
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                        .stroke(Color.appAccent.opacity(0.12), lineWidth: 1)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 200)
@@ -423,21 +501,37 @@ private struct LibraryContentView: View {
     }
 
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: AppSpacing.xl) {
             Image(systemName: "film.stack")
-                .font(.system(size: 64))
-                .foregroundStyle(.secondary)
-            Text("No Videos")
-                .font(.title)
-                .foregroundStyle(.secondary)
-            Text("Add a folder to scan for video files")
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 56))
+                .foregroundStyle(Color.appTextTertiary)
+
+            VStack(spacing: AppSpacing.sm) {
+                Text("No Videos")
+                    .font(.title)
+                    .foregroundStyle(Color.appTextPrimary)
+                Text("Add a folder to scan for video files")
+                    .foregroundStyle(Color.appTextSecondary)
+            }
+
             Button("Add Folder") {
                 vm.showFolderPicker()
             }
             .buttonStyle(.borderedProminent)
+            .tint(Color.appAccent)
             .controlSize(.large)
         }
+        .padding(AppSpacing.xxl)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+                .fill(Material.appSubtleGlass)
+                .background(Color.appSurface.opacity(0.7))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+                .stroke(Color.appAccent.opacity(0.12), lineWidth: 1)
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -448,12 +542,12 @@ private struct LibraryContentView: View {
         return HStack(spacing: 0) {
             Text("\(itemCount) \(itemCount == 1 ? "item" : "items")")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appTextSecondary)
 
             if selectedCount > 0 {
                 Text("  ·  \(selectedCount) selected")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
 
             Spacer()
@@ -462,40 +556,50 @@ private struct LibraryContentView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.mini)
+                        .tint(Color.appAccent)
                     Text("Importing \(vm.scanCurrent)/\(vm.scanTotal)")
                         .font(.caption)
                         .monospacedDigit()
+                        .foregroundStyle(Color.appTextSecondary)
                     ProgressView(
                         value: Double(vm.scanCurrent),
                         total: Double(vm.scanTotal)
                     )
+                    .tint(Color.appAccent)
                     .frame(width: 120)
                 }
             } else if vm.isConverting {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.mini)
+                        .tint(Color.appAccent)
                     Text(vm.conversionProgress)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextSecondary)
                 }
             } else if vm.isMoving {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.mini)
+                        .tint(Color.appAccent)
                     Text(vm.moveProgress)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextSecondary)
                 }
             } else if !vm.scanProgress.isEmpty {
                 Text(vm.scanProgress)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.bar)
+        .padding(.vertical, 5)
+        .background(Color.appSurface.opacity(0.55))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.appDivider)
+                .frame(height: 0.5)
+        }
     }
 }
 
@@ -521,9 +625,31 @@ private struct OverlayPlayerPanel: View {
                 .frame(width: width)
         }
         .frame(maxHeight: .infinity)
-        // Solid opaque background (not `.regularMaterial`) and no drop shadow: both re-rasterize on every
-        // width change and were the main source of drag jitter. The splitter's 1px line gives separation.
-        .background(Color(nsColor: .windowBackgroundColor))
+        // Intentional floating panel treatment: rich themed surface + rounded leading edge.
+        // We deliberately avoid heavy shadows / full materials here because they re-rasterize
+        // during live width drags and cause jitter. The visual weight comes from surface color,
+        // rounded corners, and a deliberate accent splitter instead.
+        .background(
+            Color.appSurface
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: AppRadius.xl,
+                        bottomLeadingRadius: AppRadius.xl,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 0
+                    )
+                )
+        )
+        .overlay(
+            // Very subtle outer definition so the panel feels like a placed object.
+            UnevenRoundedRectangle(
+                topLeadingRadius: AppRadius.xl,
+                bottomLeadingRadius: AppRadius.xl,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 0
+            )
+            .stroke(Color.appAccent.opacity(0.16), lineWidth: 1)
+        )
         .onChange(of: totalWidth) { _, w in
             // Persisted width can exceed a shrunken window — clamp it (infrequent, not per-frame).
             let m = max(240, w - 160)
@@ -532,31 +658,51 @@ private struct OverlayPlayerPanel: View {
     }
 
     private var splitter: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.001))
-            .frame(width: 8)
-            .frame(maxHeight: .infinity)
-            .overlay(Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1))
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        // Deliberate, visible grip that makes the overlay feel like an adjustable cinematic panel
+        // rather than a generic divider.
+        ZStack {
+            // Hit area
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 10)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+
+            // Accent-tinted separator line + subtle grip affordance
+            VStack(spacing: 3) {
+                Capsule()
+                    .fill(Color.appAccent.opacity(0.55))
+                    .frame(width: 3, height: 14)
+                Capsule()
+                    .fill(Color.appAccent.opacity(0.35))
+                    .frame(width: 3, height: 14)
+                Capsule()
+                    .fill(Color.appAccent.opacity(0.55))
+                    .frame(width: 3, height: 14)
             }
-            .gesture(
-                // `.global` space: the splitter view itself moves left as the panel widens, so a `.local`
-                // translation is measured against a moving origin — the divider drifts from the cursor and
-                // oscillates (jitter). Global space gives a true, stable mouse delta.
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        let start = dragStartWidth ?? viewModel.overlayPlayerWidth
-                        if dragStartWidth == nil { dragStartWidth = start }
-                        // translation is cumulative from drag start; drag left → wider player.
-                        dragWidth = min(max(240, start - value.translation.width), maxWidth)
-                    }
-                    .onEnded { _ in
-                        if let w = dragWidth { viewModel.overlayPlayerWidth = w }  // single commit + persist
-                        dragWidth = nil
-                        dragStartWidth = nil
-                    }
-            )
+            .frame(width: 10)
+        }
+        .frame(width: 10)
+        .frame(maxHeight: .infinity)
+        .onHover { hovering in
+            if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            // `.global` space: the splitter view itself moves left as the panel widens, so a `.local`
+            // translation is measured against a moving origin — the divider drifts from the cursor and
+            // oscillates (jitter). Global space gives a true, stable mouse delta.
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    let start = dragStartWidth ?? viewModel.overlayPlayerWidth
+                    if dragStartWidth == nil { dragStartWidth = start }
+                    // translation is cumulative from drag start; drag left → wider player.
+                    dragWidth = min(max(240, start - value.translation.width), maxWidth)
+                }
+                .onEnded { _ in
+                    if let w = dragWidth { viewModel.overlayPlayerWidth = w }  // single commit + persist
+                    dragWidth = nil
+                    dragStartWidth = nil
+                }
+        )
     }
 }

@@ -7,6 +7,7 @@ enum VideoSort: String, CaseIterable, Identifiable {
     case fileSize
     case rating
     case resolution
+    case playCount
 
     var id: String { rawValue }
 
@@ -18,7 +19,8 @@ enum VideoSort: String, CaseIterable, Identifiable {
         case .fileSize: return "File Size"
         case .rating: return "Rating"
         case .resolution: return "Resolution"
-        }
+        case .playCount: return "Plays"
+    }
     }
 
     func comparators(ascending: Bool) -> [KeyPathComparator<Video>] {
@@ -32,8 +34,9 @@ enum VideoSort: String, CaseIterable, Identifiable {
             KeyPathComparator(\Video.sortableResolutionHeight, order: order),
             KeyPathComparator(\Video.sortablePixelCount, order: order),
         ]
+        case .playCount: return [KeyPathComparator(\Video.playCount, order: order)]
         case .dateAdded: return [KeyPathComparator(\Video.dateAdded, order: order)]
-        }
+    }
     }
 
     static func from(keyPath: PartialKeyPath<Video>) -> VideoSort {
@@ -43,6 +46,8 @@ enum VideoSort: String, CaseIterable, Identifiable {
         if keyPath == \Video.rating as PartialKeyPath<Video> { return .rating }
         if keyPath == \Video.sortableResolutionHeight as PartialKeyPath<Video> { return .resolution }
         if keyPath == \Video.sortablePixelCount as PartialKeyPath<Video> { return .resolution }
+        if keyPath == \Video.playCount as PartialKeyPath<Video> { return .playCount }
+        if keyPath == \Video.sortablePlayCount as PartialKeyPath<Video> { return .playCount }
         if keyPath == \Video.dateAdded as PartialKeyPath<Video> { return .dateAdded }
         return .dateAdded
     }

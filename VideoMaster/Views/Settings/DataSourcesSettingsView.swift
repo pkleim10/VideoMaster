@@ -17,7 +17,7 @@ struct DataSourcesSettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Folders that VideoMaster will scan when you import.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appTextSecondary)
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 12)
@@ -25,21 +25,21 @@ struct DataSourcesSettingsView: View {
             List(dataSources, selection: $selectedId) { source in
                 HStack(spacing: 10) {
                     Image(systemName: "folder.fill")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextSecondary)
                         .font(.title3)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(source.name)
                             .fontWeight(.medium)
                         Text(source.folderPath)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appTextSecondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
                     Spacer()
                     Text(source.dateAdded, style: .date)
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.appTextTertiary)
                 }
                 .padding(.vertical, 2)
             }
@@ -49,12 +49,12 @@ struct DataSourcesSettingsView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "folder.badge.questionmark")
                             .font(.title)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appTextSecondary)
                         Text("No data sources")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appTextSecondary)
                         Text("Add folders to watch for video files")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Color.appTextTertiary)
                     }
                 }
             }

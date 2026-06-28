@@ -5,7 +5,6 @@ import SwiftUI
 /// Replaces the former left `SidebarView` while preserving the same `LibraryViewModel` bindings and behavior.
 struct BottomFilterColumnsView: View {
     @Bindable var viewModel: LibraryViewModel
-    @Environment(\.colorScheme) private var colorScheme
 
     @State private var showNewCollectionSheet = false
     @State private var editingCollection: VideoCollection?
@@ -20,18 +19,24 @@ struct BottomFilterColumnsView: View {
         HStack(alignment: .top, spacing: 0) {
             libraryColumn
                 .frame(minWidth: 140, maxWidth: .infinity)
-            Divider()
+            Rectangle()
+                .fill(Color.appDivider)
+                .frame(width: 1)
             collectionsColumn
                 .frame(minWidth: 140, maxWidth: .infinity)
-            Divider()
+            Rectangle()
+                .fill(Color.appDivider)
+                .frame(width: 1)
             ratingColumn
                 .frame(minWidth: 120, maxWidth: .infinity)
-            Divider()
+            Rectangle()
+                .fill(Color.appDivider)
+                .frame(width: 1)
             tagsColumn
                 .frame(minWidth: 160, maxWidth: .infinity)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .appFilterStrip()
         .contextMenu {
             Button(viewModel.showFilterStrip ? "Collapse Filter Strip" : "Expand Filter Strip") {
                 viewModel.showFilterStrip.toggle()
@@ -63,8 +68,16 @@ struct BottomFilterColumnsView: View {
             VStack(spacing: 16) {
                 Text("New Tag")
                     .font(.headline)
+                    .foregroundStyle(Color.appTextPrimary)
                 TextField("Tag name", text: $newTagName)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .padding(AppSpacing.xs)
+                    .background(Color.appSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                            .stroke(Color.appAccent.opacity(0.5), lineWidth: 1)
+                    )
                     .onSubmit {
                         let trimmed = newTagName.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmed.isEmpty else { return }
@@ -87,6 +100,7 @@ struct BottomFilterColumnsView: View {
             }
             .padding(20)
             .frame(width: 280)
+            .background(Color.appBackground)
         }
     }
 
@@ -129,9 +143,10 @@ struct BottomFilterColumnsView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .tint(Color.appAccent)
             .frame(minHeight: 120)
         }
-        .padding(8)
+        .padding(AppSpacing.sm)
     }
 
     private var collectionsColumn: some View {
@@ -139,7 +154,7 @@ struct BottomFilterColumnsView: View {
             sectionHeader("COLLECTIONS")
             if viewModel.collections.isEmpty {
                 Text("No collections")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.appTextTertiary)
                     .font(.caption)
                     .padding(.vertical, 4)
             } else if viewModel.collections.count <= Self.maxVisibleItems {
@@ -160,6 +175,7 @@ struct BottomFilterColumnsView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .tint(Color.appAccent)
                 .frame(minHeight: 80)
             } else {
                 scrollableCollections
@@ -169,11 +185,11 @@ struct BottomFilterColumnsView: View {
                 Label("New Collection", systemImage: "plus")
             }
             .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.appTextSecondary)
             .font(.caption)
             .padding(.top, 4)
         }
-        .padding(8)
+        .padding(AppSpacing.sm)
     }
 
     private var ratingColumn: some View {
@@ -188,7 +204,7 @@ struct BottomFilterColumnsView: View {
             }
             .frame(minHeight: 120)
         }
-        .padding(8)
+        .padding(AppSpacing.sm)
     }
 
     private var tagsColumn: some View {
@@ -196,7 +212,7 @@ struct BottomFilterColumnsView: View {
             tagsSectionHeader
             if viewModel.tags.isEmpty {
                 Text("No tags yet")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.appTextTertiary)
                     .font(.caption)
                     .padding(.vertical, 4)
             } else {
@@ -218,11 +234,11 @@ struct BottomFilterColumnsView: View {
                 Label("New Tag", systemImage: "plus")
             }
             .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.appTextSecondary)
             .font(.caption)
             .padding(.top, 4)
         }
-        .padding(8)
+        .padding(AppSpacing.sm)
     }
 
     // MARK: - Shared (from former SidebarView)
@@ -237,19 +253,23 @@ struct BottomFilterColumnsView: View {
                     }()
                     HStack {
                         Label(collection.name, systemImage: "folder.fill")
+                            .foregroundStyle(Color.appTextPrimary)
                         Spacer()
                         Text("\(viewModel.collectionCounts[collection.id ?? -1] ?? 0)")
                             .font(.caption2)
                             .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
-                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, AppSpacing.xxs)
+                            .padding(.vertical, 1)
+                            .background(Color.appSurface)
+                            .foregroundStyle(Color.appTextSecondary)
+                            .clipShape(Capsule())
                     }
                     .padding(.vertical, 3)
                     .padding(.horizontal, 4)
                     .background(
-                        isActive ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.3)) : nil
+                        isActive
+                            ? RoundedRectangle(cornerRadius: AppRadius.xs).fill(Color.appAccent.opacity(0.22))
+                            : nil
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -271,17 +291,21 @@ struct BottomFilterColumnsView: View {
     }
 
     private var ratingSectionHeader: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: AppSpacing.xs) {
+            Rectangle()
+                .fill(Color.appAccent)
+                .frame(width: 3, height: 14)
+                .cornerRadius(1.5)
             Text("RATING")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appAccent)
             Spacer()
             if !viewModel.selectedRatingStars.isEmpty {
                 Button("Remove Filter") {
                     viewModel.clearRatingFilter()
                 }
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appTextSecondary)
                 .buttonStyle(.borderless)
                 .help("Clear rating filter")
             }
@@ -297,10 +321,14 @@ struct BottomFilterColumnsView: View {
     }
 
     private var tagsSectionHeader: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: AppSpacing.xs) {
+            Rectangle()
+                .fill(Color.appAccent)
+                .frame(width: 3, height: 14)
+                .cornerRadius(1.5)
             Text("TAGS")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appAccent)
             Spacer()
             if !viewModel.tags.isEmpty {
                 Button(action: {
@@ -313,7 +341,7 @@ struct BottomFilterColumnsView: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(
-                            Capsule().fill(viewModel.tagFilterMode == .all ? Color.accentColor : Color.orange)
+                            Capsule().fill(viewModel.tagFilterMode == .all ? Color.appAccent : Color.orange)
                         )
                         .foregroundColor(.white)
                 }
@@ -323,7 +351,7 @@ struct BottomFilterColumnsView: View {
                         viewModel.clearTagFilters()
                     }
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
                     .buttonStyle(.borderless)
                     .help("Clear tag filters")
                 }
@@ -339,11 +367,16 @@ struct BottomFilterColumnsView: View {
     }
 
     private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 4)
+        HStack(spacing: AppSpacing.xs) {
+            Rectangle()
+                .fill(Color.appAccent)
+                .frame(width: 3, height: 14)
+                .cornerRadius(1.5)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.appAccent)
+        }
+        .padding(.bottom, 4)
     }
 
     private func tagRow(_ tag: Tag) -> some View {
@@ -355,12 +388,13 @@ struct BottomFilterColumnsView: View {
                 TextField("Tag name", text: $viewModel.tagRenameText)
                     .textFieldStyle(.plain)
                     .lineLimit(1)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, AppSpacing.xxs)
                     .padding(.vertical, 2)
-                    .background(Color(nsColor: .textBackgroundColor))
+                    .background(Color.appSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Color.accentColor, lineWidth: 2)
+                        RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                            .stroke(Color.appAccent, lineWidth: 1.5)
                     )
                     .focused($isTagRenameFocused)
                     .onSubmit { commitTagRename(tag) }
@@ -376,22 +410,23 @@ struct BottomFilterColumnsView: View {
                     }
             } else {
                 Label(tag.name, systemImage: "tag")
-                    .foregroundStyle(isSelected ? .primary : .primary)
+                    .foregroundStyle(Color.appTextPrimary)
             }
             Spacer()
             Text("\(viewModel.tagCounts[tagId] ?? 0)")
                 .font(.caption2)
                 .fontWeight(.medium)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.quaternary, in: Capsule())
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, AppSpacing.xxs)
+                .padding(.vertical, 1)
+                .background(Color.appSurface)
+                .foregroundStyle(Color.appTextSecondary)
+                .clipShape(Capsule())
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 4)
         .background(
             isSelected
-                ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.3))
+                ? RoundedRectangle(cornerRadius: AppRadius.xs).fill(Color.appAccent.opacity(0.22))
                 : nil
         )
         .contentShape(Rectangle())
@@ -471,17 +506,18 @@ struct BottomFilterColumnsView: View {
                 ForEach(1...5, id: \.self) { i in
                     Image(systemName: i <= stars ? "star.fill" : "star")
                         .font(.caption2)
-                        .foregroundColor(i <= stars ? (colorScheme == .dark ? .yellow : .black) : .gray.opacity(0.3))
+                        .foregroundStyle(i <= stars ? Color.yellow : Color.appTextTertiary.opacity(0.5))
                 }
             }
             Spacer()
             Text("\(count)")
                 .font(.caption2)
                 .fontWeight(.medium)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.quaternary, in: Capsule())
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, AppSpacing.xxs)
+                .padding(.vertical, 1)
+                .background(Color.appSurface)
+                .foregroundStyle(Color.appTextSecondary)
+                .clipShape(Capsule())
         }
     }
 
@@ -492,7 +528,7 @@ struct BottomFilterColumnsView: View {
             .padding(.horizontal, 4)
             .background(
                 isSelected
-                    ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.3))
+                    ? RoundedRectangle(cornerRadius: AppRadius.xs).fill(Color.appAccent.opacity(0.22))
                     : nil
             )
             .contentShape(Rectangle())
@@ -521,14 +557,16 @@ struct BottomFilterColumnsView: View {
     private func sidebarRow(_ title: String, icon: String, count: Int, unscanned: Bool = false) -> some View {
         HStack {
             Label(title, systemImage: icon)
+                .foregroundStyle(Color.appTextPrimary)
             Spacer()
             Text(unscanned ? "—" : "\(count)")
                 .font(.caption2)
                 .fontWeight(.medium)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.quaternary, in: Capsule())
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, AppSpacing.xxs)
+                .padding(.vertical, 1)
+                .background(Color.appSurface)
+                .foregroundStyle(Color.appTextSecondary)
+                .clipShape(Capsule())
         }
     }
 }

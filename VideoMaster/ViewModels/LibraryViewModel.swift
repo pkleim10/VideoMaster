@@ -1178,6 +1178,8 @@ final class LibraryViewModel {
             result.sort { descending ? $0.fileSize > $1.fileSize : $0.fileSize < $1.fileSize }
         case .rating:
             result.sort { descending ? $0.rating > $1.rating : $0.rating < $1.rating }
+        case .playCount:
+            result.sort { descending ? $0.playCount > $1.playCount : $0.playCount < $1.playCount }
         case .resolution:
             result.sort { a, b in
                 if a.sortableResolutionHeight != b.sortableResolutionHeight {

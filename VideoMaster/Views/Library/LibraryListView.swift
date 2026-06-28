@@ -152,6 +152,7 @@ struct LibraryListView: View {
         ) {
             listTableColumns()
         }
+        .tint(Color.appAccent)
         .id("\(viewModel.filteredVideosVersion)-\(viewModel.listColumnConfigurationSignature)")
         .background(TableScrollHelper(scrollToRow: scrollToRow))
         .background(ScrollCommandHandler(command: viewModel.scrollCommand, mode: .list))
@@ -330,7 +331,7 @@ struct LibraryListView: View {
             TableColumn("Duration", value: \.sortableDuration) { video in
                 Text(video.formattedDuration ?? "—")
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
             .width(min: 60, ideal: 80)
             .alignment(.trailing)
@@ -341,10 +342,15 @@ struct LibraryListView: View {
             TableColumn("Resolution", value: \.sortableResolutionHeight) { video in
                 if let label = video.resolutionLabel {
                     Text(label)
-                        .foregroundStyle(.secondary)
+                        .font(Font.appCaption2)
+                        .padding(.horizontal, AppSpacing.xxs)
+                        .padding(.vertical, 1)
+                        .background(Color.appSurface)
+                        .foregroundStyle(Color.appAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
                 } else {
                     Text("—")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.appTextTertiary)
                 }
             }
             .width(min: 60, ideal: 80)
@@ -356,7 +362,7 @@ struct LibraryListView: View {
             TableColumn("Size", value: \.fileSize) { video in
                 Text(video.formattedFileSize)
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
             .width(min: 60, ideal: 80)
             .alignment(.trailing)
@@ -377,7 +383,7 @@ struct LibraryListView: View {
         if viewModel.isStandardListColumnVisible("dateAdded") {
             TableColumn("Date Added", value: \.dateAdded) { video in
                 Text(video.dateAdded, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
                     .help(video.dateAdded.formatted(date: .abbreviated, time: .shortened))
             }
             .width(min: 80, ideal: 100)
@@ -385,10 +391,10 @@ struct LibraryListView: View {
         }
 
         if viewModel.isStandardListColumnVisible("playCount") {
-            TableColumn("Plays", value: \.playCount) { video in
+            TableColumn("Plays", value: \.sortablePlayCount) { video in
                 Text("\(video.playCount)")
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
             .width(min: 56, ideal: 72)
             .alignment(.trailing)
@@ -399,11 +405,11 @@ struct LibraryListView: View {
             TableColumn("Created", value: \.sortableCreationDate) { video in
                 if let created = video.creationDate {
                     Text(created, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextSecondary)
                         .help(created.formatted(date: .abbreviated, time: .shortened))
                 } else {
                     Text("—")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.appTextTertiary)
                 }
             }
             .width(min: 80, ideal: 100)
@@ -414,11 +420,11 @@ struct LibraryListView: View {
             TableColumn("Last Played", value: \.sortableLastPlayed) { video in
                 if let last = video.lastPlayed {
                     Text(last, format: .dateTime.month(.twoDigits).day(.twoDigits).year())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appTextSecondary)
                         .help(last.formatted(date: .abbreviated, time: .shortened))
                 } else {
                     Text("—")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.appTextTertiary)
                 }
             }
             .width(min: 80, ideal: 100)
@@ -460,7 +466,7 @@ struct LibraryListView: View {
         TableColumn(field.name, value: \.fileName) { video in
             Text(viewModel.listCustomFieldDisplay(for: video, field: field))
                 .lineLimit(2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appTextSecondary)
         }
         .width(min: 80, ideal: 120)
         .customizationID("custom-\(field.id.uuidString)")
@@ -468,14 +474,14 @@ struct LibraryListView: View {
 
     @ViewBuilder
     private func nameRowView(for video: Video) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: AppSpacing.sm) {
             AsyncThumbnailView(
                 filePath: video.filePath,
                 thumbnailService: thumbnailService,
                 cacheVersion: video.thumbnailPath
             )
             .frame(width: 56, height: 36)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .appMediaFrame(cornerRadius: AppRadius.sm)
             .onHover { hovering in
                 thumbnailPopoverVideoId = hovering ? video.id : nil
             }
@@ -490,19 +496,20 @@ struct LibraryListView: View {
                     filePath: video.filePath, thumbnailService: thumbnailService
                 )
                 .frame(width: 224, height: 144)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .appMediaFrame(cornerRadius: AppRadius.md)
             }
 
             if viewModel.renamingVideoId == video.id {
                 TextField("", text: $viewModel.renameText)
                     .textFieldStyle(.plain)
                     .lineLimit(1)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(Color(nsColor: .textBackgroundColor))
+                    .padding(.horizontal, AppSpacing.xs)
+                    .padding(.vertical, AppSpacing.xxs)
+                    .background(Color.appSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Color.accentColor, lineWidth: 2)
+                        RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                            .stroke(Color.appAccent, lineWidth: 1.5)
                     )
                     .focused($isRenameFocused)
                     .onSubmit { commitRename(video) }
@@ -519,16 +526,15 @@ struct LibraryListView: View {
             } else {
                 Text(video.fileName)
                     .lineLimit(1)
+                    .foregroundStyle(Color.appTextPrimary)
                 if video.hasSubtitles {
-                    // Accent-tinted pill with a white filled captions.bubble — matches the
-                    // "on" appearance of the Subtitles toggle in the detail pane so the two
-                    // surfaces read as the same affordance.
+                    // Blue-accented subtitles indicator, consistent with Cinematic Blue theme.
                     Image(systemName: "captions.bubble.fill")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 4))
+                        .background(Color.appAccent, in: RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous))
                         .help("Subtitles available")
                         .accessibilityLabel("Subtitles available")
                 }

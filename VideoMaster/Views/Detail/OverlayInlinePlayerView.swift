@@ -23,11 +23,21 @@ struct OverlayInlinePlayerView: View {
     @State private var statusTask: Task<Void, Never>?
 
     var body: some View {
-        ZStack {
-            Color.black
+        ZStack(alignment: .top) {
+            // Deep background so the framed player feels grounded inside the panel.
+            Color.appBackground
+
             if let player {
+                // The actual player is framed to feel like a deliberate piece of media
+                // rather than raw video bleeding to the edges of the panel.
                 FloatingPlayerView(player: player, showsFullscreenButton: false)
+                    .appMediaFrame(cornerRadius: AppRadius.lg)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 28)   // leave room for the compact header
+                    .padding(.bottom, 10)
+
                 SubtitleOverlayContainer(track: subtitleTrack)
+
                 if didAutoResume, let resumeSecs = resumedFromSeconds {
                     resumeOverlay(resumedFromSeconds: resumeSecs) {
                         cancelResumeBannerFadeTask()
@@ -42,6 +52,11 @@ struct OverlayInlinePlayerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
+
+            // Minimal header bar — signals that this is a placed, first-class player panel
+            // rather than video that just happens to be here.
+            overlayHeader
+
             if let playerError {
                 errorOverlay(playerError)
             }
@@ -85,6 +100,38 @@ struct OverlayInlinePlayerView: View {
             stopPlayback()
             viewModel.pendingFilmstripSeekSeconds = nil
         }
+    }
+
+    // Very compact header that makes the overlay read as a deliberate floating player panel.
+    private var overlayHeader: some View {
+        HStack(spacing: 6) {
+            Text(video.fileName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.appTextSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 8)
+
+            Button {
+                viewModel.isPlayingInline = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.appTextTertiary)
+            .frame(width: 16, height: 16)
+            .contentShape(Rectangle())
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Rectangle()
+                .fill(Color.appSurface.opacity(0.92))
+                .overlay(Rectangle().fill(Color.appDivider.opacity(0.6)).frame(height: 0.5), alignment: .bottom)
+        )
     }
 
     // MARK: - Playback lifecycle (no fullscreen routing — see type doc)
@@ -211,55 +258,66 @@ struct OverlayInlinePlayerView: View {
         HStack(spacing: 10) {
             Text("Resumed at \(formatTimestamp(resumedFromSeconds))")
                 .font(.caption)
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.appTextPrimary)
             Button("Start at beginning", action: startAtBeginning)
                 .font(.caption)
                 .buttonStyle(.borderedProminent)
+                .tint(Color.appAccent)
                 .controlSize(.small)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, AppSpacing.sm)
+        .background(Material.appFloatingMaterial, in: RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .strokeBorder(Color.appAccent.opacity(0.35), lineWidth: 1)
         )
     }
 
     private func errorOverlay(_ message: String) -> some View {
         ZStack {
             Color.black.opacity(0.55)
-            VStack(spacing: 12) {
+            VStack(spacing: AppSpacing.lg) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 30))
                     .foregroundStyle(.yellow)
                 Text("Playback Failed")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.appTextPrimary)
                 Text(message)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Color.appTextSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)
-                HStack(spacing: 10) {
+                HStack(spacing: AppSpacing.md) {
                     Button("Open in External Player") {
                         playerError = nil
                         NSWorkspace.shared.open(video.url)
                         Task { await viewModel.recordPlay(for: video) }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(Color.appAccent)
                     .controlSize(.small)
                     Button("Dismiss") {
                         playerError = nil
                         viewModel.isPlayingInline = false
                     }
                     .buttonStyle(.bordered)
+                    .tint(Color.appAccent)
                     .controlSize(.small)
-                    .foregroundStyle(.white)
                 }
             }
-            .padding()
+            .padding(AppSpacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                    .fill(Material.appFloatingMaterial)
+                    .background(Color.appSurface.opacity(0.7))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                    .stroke(Color.appAccent.opacity(0.25), lineWidth: 1)
+            )
         }
     }
 

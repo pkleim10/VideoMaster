@@ -9,7 +9,7 @@ struct CustomMetadataSettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Define fields for custom metadata. Per-video editing will use these types in a later update.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appTextSecondary)
                 .padding(.bottom, 8)
 
             List(selection: $selectedFieldIds) {

@@ -15,11 +15,11 @@ struct ListColumnsSettingsContent: View {
         Group {
             HStack {
                 Label("Name", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
                 Spacer()
                 Text("Always visible")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
             }
 
             Toggle("Duration", isOn: bindingStandard("duration"))
@@ -34,7 +34,7 @@ struct ListColumnsSettingsContent: View {
             if listableCustomDefinitions.isEmpty {
                 Text("No listable custom metadata fields (multiline “Text” fields are excluded). Add fields in the Custom Metadata settings tab.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appTextSecondary)
                     .padding(.top, 4)
             } else {
                 ForEach(listableCustomDefinitions) { field in
