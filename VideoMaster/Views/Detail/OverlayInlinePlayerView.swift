@@ -50,22 +50,13 @@ struct OverlayInlinePlayerView: View {
                 errorOverlay(playerError)
             }
         }
-        .task(id: video.id) {
-            let seek = viewModel.pendingFilmstripSeekSeconds ?? 0
-            viewModel.pendingFilmstripSeekSeconds = nil
-            playback.start(video: video, at: seek)
-        }
+        // Start/stop is driven by ContentView (from `isPlayingInline`), not this view's lifecycle, so
+        // the panel can unmount/remount (e.g. entering/leaving full-screen) without tearing down the
+        // player. This view is a pure renderer of the shared controller's state.
         .onChange(of: viewModel.fadeResumeBannerAutomatically) { _, enabled in
             playback.onFadeSettingChanged(enabled: enabled)
         }
         .onChange(of: viewModel.resumeBannerFadeDelaySeconds) { _, _ in playback.onFadeDelayChanged() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            playback.persistPosition()
-        }
-        .onDisappear {
-            playback.stop()
-            viewModel.pendingFilmstripSeekSeconds = nil
-        }
     }
 
     // Very compact header that makes the overlay read as a deliberate floating player panel.

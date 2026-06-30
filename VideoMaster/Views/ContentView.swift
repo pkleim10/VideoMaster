@@ -25,6 +25,7 @@ private struct LibraryContentView: View {
     @State private var listScrollPositionRow: Int?
     /// Must remove when the view goes away; repeated `onAppear` without removal stacks monitors and breaks handling.
     @State private var keyDownMonitor: Any?
+    @State private var fullScreenController: FullscreenInlinePlayerWindowController?
     @State private var showListColumnsSheet = false
     @FocusState private var isSearchFocused: Bool
 
@@ -247,8 +248,9 @@ private struct LibraryContentView: View {
             )
             .overlay {
                 // The single resizable player: one surface anchored top-right, shown whenever
-                // playback is active. Floats above the wall/inspector (no freeze/resize).
-                if vm.isPlayingInline, let video = selectedVideo {
+                // playback is active. Hidden while in true full-screen (the borderless window hosts
+                // the same player instead). Floats above the wall/inspector (no freeze/resize).
+                if vm.isPlayingInline, !vm.isPlayerFullScreen, let video = selectedVideo {
                     GeometryReader { geo in
                         FloatingPlayerPanel(video: video, viewModel: vm, available: geo.size)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -256,6 +258,48 @@ private struct LibraryContentView: View {
                 }
             }
             .navigationTitle(navigationTitle)
+            // Drive the shared player lifecycle from state, not from any view's appear/disappear, so
+            // the panel can hide for full-screen without tearing down the player.
+            .onChange(of: vm.isPlayingInline) { _, isOn in
+                if isOn {
+                    guard let v = selectedVideo else { vm.isPlayingInline = false; return }
+                    let seek = vm.pendingFilmstripSeekSeconds ?? 0
+                    vm.pendingFilmstripSeekSeconds = nil
+                    vm.playback.start(video: v, at: seek)
+                    // Apply the starting-size preference. `.lastSize` keeps the persisted size as-is;
+                    // `.compact` is applied by the panel on appear (it knows the inspector footprint).
+                    switch vm.playerStartPreference {
+                    case .fullScreen: vm.isPlayerFullScreen = true
+                    case .compact: vm.pendingApplyCompactSize = true
+                    case .lastSize: break
+                    }
+                } else {
+                    vm.isPlayerFullScreen = false
+                    vm.playback.stop()
+                }
+            }
+            // Enter/leave true full-screen by moving the *same* player into a borderless window.
+            .onChange(of: vm.isPlayerFullScreen) { _, isFS in
+                if isFS {
+                    guard let player = vm.playback.player else { vm.isPlayerFullScreen = false; return }
+                    let controller = FullscreenInlinePlayerWindowController()
+                    fullScreenController = controller
+                    controller.present(
+                        player: player,
+                        title: selectedVideo?.fileName ?? "",
+                        startWindowInFullscreen: true,
+                        subtitleTrack: vm.playback.subtitleTrack
+                    ) {
+                        vm.isPlayerFullScreen = false
+                    }
+                } else {
+                    fullScreenController?.closeWindow()
+                    fullScreenController = nil
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                vm.playback.persistPosition()
+            }
 
             // Hidden for Curated Wall to keep the gallery + inspector clean (per mock aesthetic)
             // statusBar(vm: vm)

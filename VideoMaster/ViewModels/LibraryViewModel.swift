@@ -482,13 +482,16 @@ final class LibraryViewModel {
     /// True while the player is in true (borderless, edge-to-edge) full-screen.
     var isPlayerFullScreen: Bool = false
 
+    /// Set on playback start so the panel snaps to the compact (inspector) footprint on its first
+    /// appearance; cleared after applying. Transient — not persisted, and not re-applied on the
+    /// full-screen round-trip.
+    @ObservationIgnored var pendingApplyCompactSize: Bool = false
+
     /// Preferred size the player opens at when playback starts.
-    var playerStartPreference: PlayerStartPreference = .compact {
+    var playerStartPreference: PlayerStartPreference = .lastSize {
         didSet {
             guard playerStartPreference != oldValue else { return }
-            if let data = try? JSONEncoder().encode(playerStartPreference) {
-                UserDefaults.standard.set(data, forKey: Self.playerStartPreferenceKey)
-            }
+            UserDefaults.standard.set(playerStartPreference.rawValue, forKey: Self.playerStartPreferenceKey)
         }
     }
 
@@ -863,8 +866,8 @@ final class LibraryViewModel {
            let h = defaults.object(forKey: Self.playerFloatingHeightKey) as? Double, h > 0 {
             playerFloatingSize = CGSize(width: w, height: h)
         }
-        if let data = defaults.data(forKey: Self.playerStartPreferenceKey),
-           let pref = try? JSONDecoder().decode(PlayerStartPreference.self, from: data) {
+        if let raw = defaults.string(forKey: Self.playerStartPreferenceKey),
+           let pref = PlayerStartPreference(rawValue: raw) {
             playerStartPreference = pref
         }
         if defaults.object(forKey: Self.fadeResumeBannerAutomaticallyKey) != nil {

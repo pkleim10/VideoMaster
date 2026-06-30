@@ -33,10 +33,12 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 - Playback redesign (in progress): unifying the three playback modes into one resizable player surface backed by a single shared `InlinePlaybackController` (resume load/save, sidecar subtitles, error handling, recordPlay, play-pause/restart).
   - Introduced the shared engine and a single `FloatingPlayerPanel` host: one player anchored top-right, shown whenever playback is active, with subtitles, resume banner, and error handling in one place.
-  - The panel is **resizable** via a lower-left handle (top-right anchored), clamped between a compact minimum and the available area, with S/M/L size presets; size is persisted.
-  - The inspector hero is now still/filmstrip only; the player floats above it. Filmstrip click and hero tap start playback carrying the clicked seek time.
+  - The panel is **resizable** via a lower-left handle (top-right anchored, jitter-free), clamped between a compact minimum and the available area, with **▭ S M L ⤢** controls: compact (snap to the inspector still/filmstrip footprint), small/medium/large presets, and full-screen. Size is persisted.
+  - **True full-screen carry-across**: going full-screen moves the *same* player into a borderless edge-to-edge window (no restart; position + subtitles preserved). Esc stops playback and closes; the bottom-right button exits back to the windowed player still playing.
+  - The inspector hero is now still/filmstrip only; the player floats above it. Filmstrip click and hero tap start playback carrying the clicked seek time. Removed the obsolete inspector "overlay" action button.
+  - **Settings → Playback**: "Player opens at" preference — Compact / Full screen / Last used size.
   - Restart-from-beginning is the ⌘⌥R menu command (Shift+Space proved unreliable on Space in this path).
-  - Added the size-preference state model (`compact | fullScreen | specific`). Still to come: true full-screen carry-across, the starting-size preference UI, and removing the old three-mode machinery + dead `VideoDetailView`.
+  - Still to come: removing the old three-mode machinery + dead `VideoDetailView`.
 
 - Playback: removed the legacy "browser reshape" behavior (detail-pane playback used to freeze + resize the browsing column, swap to a separate `playbackLayout`, and re-anchor scroll / restore list columns on exit). In the Wall + Inspector layout the player lives inside the fixed inspector hero, so the wall never moves — this scaffolding was dormant and a source of layout pulses. Removed `inlinePlaybackReshapesBrowser`, the separate `playbackLayout` (now a single shared layout), the detail-pane exit re-anchor/column-restore, and the content freeze during playback. The fullscreen-exit grid repaint (occlusion) is preserved.
 

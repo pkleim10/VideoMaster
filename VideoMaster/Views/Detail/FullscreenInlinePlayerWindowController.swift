@@ -71,8 +71,9 @@ final class FullscreenInlinePlayerWindowController: NSObject, NSWindowDelegate {
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(closeButton)
         NSLayoutConstraint.activate([
+            // Bottom-right, matching the windowed panel's full-screen button placement.
             closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
+            closeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
             closeButton.widthAnchor.constraint(equalToConstant: 28),
             closeButton.heightAnchor.constraint(equalToConstant: 28),
         ])
@@ -145,12 +146,15 @@ final class FullscreenInlinePlayerWindowController: NSObject, NSWindowDelegate {
     private func makeCloseButton() -> NSButton {
         let b = NSButton()
         b.bezelStyle = .accessoryBarAction
-        b.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")
+        // This returns to the windowed player (playback continues), so it reads as "exit full screen"
+        // rather than "close/stop".
+        b.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left",
+                          accessibilityDescription: "Exit Full Screen")
         b.imagePosition = .imageOnly
         b.isBordered = false
         b.target = self
         b.action = #selector(closeButtonTapped)
-        b.toolTip = "Close"
+        b.toolTip = "Exit Full Screen (Esc)"
         b.contentTintColor = .labelColor
         return b
     }
@@ -179,7 +183,8 @@ final class FullscreenInlinePlayerWindowController: NSObject, NSWindowDelegate {
             NSEvent.removeMonitor(keyDownMonitor)
             self.keyDownMonitor = nil
         }
-        playerView.player?.pause()
+        // Detach the player from this window's view *without pausing* — the AVPlayer is owned by the
+        // shared InlinePlaybackController and carries on playing back in the in-window panel.
         playerView.player = nil
         subtitleHost?.removeFromSuperview()
         subtitleHost = nil

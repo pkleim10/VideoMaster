@@ -230,13 +230,6 @@ struct CuratedWallInspector: View {
                 }.buttonStyle(.plain)
 
                 Spacer()
-
-                Button {
-                    viewModel.setInlinePlaybackMode(.overlay)
-                    viewModel.isPlayingInline = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                }.buttonStyle(.plain).foregroundStyle(Color.appTextSecondary)
             }
             .font(.callout)
         }
