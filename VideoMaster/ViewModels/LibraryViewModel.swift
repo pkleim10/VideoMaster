@@ -265,6 +265,9 @@ final class LibraryViewModel {
     private static let playInlineStartsFullscreenKey = "VideoMaster.playInlineStartsFullscreen"
     private static let playInlineInOverlayKey = "VideoMaster.playInlineInOverlay"
     private static let overlayPlayerWidthKey = "VideoMaster.overlayPlayerWidth"
+    private static let playerFloatingWidthKey = "VideoMaster.playerFloatingWidth"
+    private static let playerFloatingHeightKey = "VideoMaster.playerFloatingHeight"
+    private static let playerStartPreferenceKey = "VideoMaster.playerStartPreference"
     private static let fadeResumeBannerAutomaticallyKey = "VideoMaster.fadeResumeBannerAutomatically"
     private static let resumeBannerFadeDelaySecondsKey = "VideoMaster.resumeBannerFadeDelaySeconds"
     private static let recentlyAddedDaysKey = "VideoMaster.recentlyAddedDays"
@@ -461,6 +464,31 @@ final class LibraryViewModel {
             let clamped = max(240, overlayPlayerWidth)
             if clamped != overlayPlayerWidth { overlayPlayerWidth = clamped; return }
             UserDefaults.standard.set(Double(clamped), forKey: Self.overlayPlayerWidthKey)
+        }
+    }
+
+    // MARK: - Single resizable player (redesign — see Playback_Redesign_Plan_2026-06-30.md)
+
+    /// Current in-window size of the single floating player (anchored top-right). Persisted as the
+    /// last size so the player reopens where the user left it.
+    var playerFloatingSize: CGSize = CGSize(width: 480, height: 300) {
+        didSet {
+            guard playerFloatingSize != oldValue else { return }
+            UserDefaults.standard.set(Double(playerFloatingSize.width), forKey: Self.playerFloatingWidthKey)
+            UserDefaults.standard.set(Double(playerFloatingSize.height), forKey: Self.playerFloatingHeightKey)
+        }
+    }
+
+    /// True while the player is in true (borderless, edge-to-edge) full-screen.
+    var isPlayerFullScreen: Bool = false
+
+    /// Preferred size the player opens at when playback starts.
+    var playerStartPreference: PlayerStartPreference = .compact {
+        didSet {
+            guard playerStartPreference != oldValue else { return }
+            if let data = try? JSONEncoder().encode(playerStartPreference) {
+                UserDefaults.standard.set(data, forKey: Self.playerStartPreferenceKey)
+            }
         }
     }
 
@@ -830,6 +858,14 @@ final class LibraryViewModel {
         }
         if let w = defaults.object(forKey: Self.overlayPlayerWidthKey) as? Double, w > 0 {
             overlayPlayerWidth = CGFloat(w)
+        }
+        if let w = defaults.object(forKey: Self.playerFloatingWidthKey) as? Double, w > 0,
+           let h = defaults.object(forKey: Self.playerFloatingHeightKey) as? Double, h > 0 {
+            playerFloatingSize = CGSize(width: w, height: h)
+        }
+        if let data = defaults.data(forKey: Self.playerStartPreferenceKey),
+           let pref = try? JSONDecoder().decode(PlayerStartPreference.self, from: data) {
+            playerStartPreference = pref
         }
         if defaults.object(forKey: Self.fadeResumeBannerAutomaticallyKey) != nil {
             fadeResumeBannerAutomatically = defaults.bool(forKey: Self.fadeResumeBannerAutomaticallyKey)

@@ -31,6 +31,13 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+- Playback redesign (in progress): unifying the three playback modes into one resizable player surface backed by a single shared `InlinePlaybackController` (resume load/save, sidecar subtitles, error handling, recordPlay, play-pause/restart).
+  - Introduced the shared engine and a single `FloatingPlayerPanel` host: one player anchored top-right, shown whenever playback is active, with subtitles, resume banner, and error handling in one place.
+  - The panel is **resizable** via a lower-left handle (top-right anchored), clamped between a compact minimum and the available area, with S/M/L size presets; size is persisted.
+  - The inspector hero is now still/filmstrip only; the player floats above it. Filmstrip click and hero tap start playback carrying the clicked seek time.
+  - Restart-from-beginning is the ⌘⌥R menu command (Shift+Space proved unreliable on Space in this path).
+  - Added the size-preference state model (`compact | fullScreen | specific`). Still to come: true full-screen carry-across, the starting-size preference UI, and removing the old three-mode machinery + dead `VideoDetailView`.
+
 - Playback: removed the legacy "browser reshape" behavior (detail-pane playback used to freeze + resize the browsing column, swap to a separate `playbackLayout`, and re-anchor scroll / restore list columns on exit). In the Wall + Inspector layout the player lives inside the fixed inspector hero, so the wall never moves — this scaffolding was dormant and a source of layout pulses. Removed `inlinePlaybackReshapesBrowser`, the separate `playbackLayout` (now a single shared layout), the detail-pane exit re-anchor/column-restore, and the content freeze during playback. The fullscreen-exit grid repaint (occlusion) is preserved.
 
 - Curated Wall filters drawer: arranged the filter cards (Smart Libraries · Collections · Rating + Duration · Tags) so they **reflow responsively and pack column-major**, preserving reading order as the wall narrows — 4-across when wide, collapsing to 3 columns (`[Smart+Collections] [Rating+Duration] [Tags]`), then 2, then a single stacked column. Each column sizes to its widest card and cards fill their column width (no shrinkwrapping), so the drawer stays readable at any pane width instead of squishing. The last column always stretches to fill the remaining width so its cards reach the drawer's right edge.

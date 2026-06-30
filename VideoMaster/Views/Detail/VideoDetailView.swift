@@ -1577,21 +1577,4 @@ struct MetadataRow: View {
     }
 }
 
-struct FloatingPlayerView: NSViewRepresentable {
-    let player: AVPlayer
-    var showsFullscreenButton: Bool = true
-
-    func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
-        view.player = player
-        view.controlsStyle = .floating
-        view.showsFullScreenToggleButton = showsFullscreenButton
-        return view
-    }
-
-    func updateNSView(_ nsView: AVPlayerView, context: Context) {
-        if nsView.player !== player {
-            nsView.player = player
-        }
-    }
-}
+// FloatingPlayerView moved to FloatingPlayerView.swift (with Shift+Space restart interception).

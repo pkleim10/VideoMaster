@@ -23,7 +23,8 @@ struct OverlayInlinePlayerView: View {
             if let player = playback.player {
                 // The actual player is framed to feel like a deliberate piece of media
                 // rather than raw video bleeding to the edges of the panel.
-                FloatingPlayerView(player: player, showsFullscreenButton: false)
+                FloatingPlayerView(player: player, showsFullscreenButton: false,
+                                   onRestartFromBeginning: { playback.restartFromBeginning() })
                     .appMediaFrame(cornerRadius: AppRadius.lg)
                     .padding(.horizontal, 10)
                     .padding(.top, 28)   // leave room for the compact header
@@ -54,8 +55,6 @@ struct OverlayInlinePlayerView: View {
             viewModel.pendingFilmstripSeekSeconds = nil
             playback.start(video: video, at: seek)
         }
-        .onChange(of: viewModel.inlinePlayPauseToggle) { _, _ in playback.togglePlayPause() }
-        .onChange(of: viewModel.inlineRestartFromBeginning) { _, _ in playback.restartFromBeginning() }
         .onChange(of: viewModel.fadeResumeBannerAutomatically) { _, enabled in
             playback.onFadeSettingChanged(enabled: enabled)
         }

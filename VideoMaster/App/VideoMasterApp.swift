@@ -64,6 +64,12 @@ struct VideoMasterApp: App {
                 }
                 .keyboardShortcut("3", modifiers: [.command, .option])
                 .disabled(!appState.hasLibrary)
+
+                Button("Restart from Beginning") {
+                    appState.libraryViewModel?.playback.restartFromBeginning()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(!appState.hasLibrary)
             }
             CommandGroup(after: .pasteboard) {
                 Button("Delete\u{2026}") {

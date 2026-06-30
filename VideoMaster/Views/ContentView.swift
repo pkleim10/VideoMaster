@@ -246,12 +246,12 @@ private struct LibraryContentView: View {
                 }
             )
             .overlay {
-                // Floating overlay player: covers only its trailing panel, leaving the browser/detail beneath
-                // untouched (no freeze/resize → grid scroll preserved). Shown only in overlay playback mode.
-                if vm.inlineOverlayActive, vm.isPlayingInline, let video = selectedVideo {
+                // The single resizable player: one surface anchored top-right, shown whenever
+                // playback is active. Floats above the wall/inspector (no freeze/resize).
+                if vm.isPlayingInline, let video = selectedVideo {
                     GeometryReader { geo in
-                        OverlayPlayerPanel(video: video, viewModel: vm, totalWidth: geo.size.width)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        FloatingPlayerPanel(video: video, viewModel: vm, available: geo.size)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     }
                 }
             }
@@ -619,23 +619,22 @@ private struct LibraryContentView: View {
             return event
         }
         // Space key — play/pause; Shift+Space — restart from beginning
+        // Space — play/pause (or start playback). Restart-from-beginning is the ⌘⌥R menu command
+        // (Shift+Space proved unreliable: the Shift modifier doesn't reach this handler on Space).
         if event.keyCode == 49 {
+            // A focused text field (e.g. Notes) wins so a space can be typed.
             if let first = NSApp.keyWindow?.firstResponder,
                first is NSTextView || first is NSTextField
             {
                 return event
             }
-            guard !lvm.isEditingText, !lvm.selectedVideoIds.isEmpty else { return event }
-            let isShift = event.modifierFlags.contains(.shift)
-            DispatchQueue.main.async {
-                if isShift {
-                    lvm.inlineRestartFromBeginning += 1
-                } else if lvm.isPlayingInline {
-                    lvm.inlinePlayPauseToggle += 1
-                } else {
-                    lvm.isPlayingInline = true
-                }
+            guard !lvm.isEditingText else { return event }
+            if lvm.isPlayingInline {
+                DispatchQueue.main.async { lvm.playback.togglePlayPause() }
+                return nil
             }
+            guard !lvm.selectedVideoIds.isEmpty else { return event }
+            DispatchQueue.main.async { lvm.isPlayingInline = true }
             return nil
         }
 

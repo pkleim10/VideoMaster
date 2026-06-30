@@ -16,9 +16,9 @@ struct CuratedWallInspector: View {
 
     @State private var hero: NSImage?
     @State private var filmstrip: NSImage?
-    @State private var heroPlayer: AVPlayer?
     @State private var notes: String = ""
     private var notesKey: String { "CuratedWall.notes.\(video?.filePath ?? "none")" }
+
 
     var body: some View {
         GeometryReader { geo in
@@ -61,8 +61,11 @@ struct CuratedWallInspector: View {
         .frame(minWidth: 300)
         .onAppear { loadNotes() }
         .onChange(of: video?.filePath) { _, _ in
+            // Selection changed: stop any in-progress playback and refresh hero assets.
+            if viewModel.isPlayingInline { viewModel.isPlayingInline = false }
             loadNotes()
             hero = nil
+            filmstrip = nil
         }
         .onChange(of: notes) { _, val in
             UserDefaults.standard.set(val, forKey: notesKey)
@@ -70,18 +73,6 @@ struct CuratedWallInspector: View {
         .onChange(of: viewModel.showThumbnailInDetail) { _, _ in
             filmstrip = nil
             Task { await loadHero() }
-        }
-        .onChange(of: video?.filePath) { _, _ in
-            stopHeroPlayer()
-            hero = nil
-            filmstrip = nil
-        }
-        .onChange(of: viewModel.isPlayingInline) { _, isOn in
-            if isOn && !viewModel.inlineOverlayActive {
-                startLocalHeroPlayer()
-            } else if !isOn {
-                stopHeroPlayer()
-            }
         }
         .task(id: video?.filePath) {
             await loadHero()
@@ -91,14 +82,13 @@ struct CuratedWallInspector: View {
     // MARK: - Hero
 
     private func heroView(for v: Video, height: CGFloat) -> some View {
-        let isDetailPlaying = viewModel.isPlayingInline && !viewModel.inlineOverlayActive
+        // The hero is always the still/filmstrip preview now; playback renders in the floating
+        // player panel that overlays this area while playing.
+        let isPlaying = viewModel.isPlayingInline
 
         // Core media view with consistent sizing and clipping.
         let media: some View = Group {
-            if isDetailPlaying, let p = heroPlayer {
-                FloatingPlayerView(player: p)
-                    .aspectRatio(16/9, contentMode: .fit)
-            } else if viewModel.showThumbnailInDetail {
+            if viewModel.showThumbnailInDetail {
                 if let img = hero {
                     Image(nsImage: img)
                         .resizable()
@@ -142,8 +132,8 @@ struct CuratedWallInspector: View {
                 .stroke(Color.appDivider.opacity(0.3), lineWidth: 1)
         )
         .onTapGesture {
-            if !isDetailPlaying {
-                viewModel.setInlinePlaybackMode(.detailPane)
+            // Start in whatever mode the setting indicates (don't force detail-pane).
+            if !viewModel.isPlayingInline {
                 viewModel.pendingFilmstripSeekSeconds = nil
                 viewModel.isPlayingInline = true
             }
@@ -153,7 +143,7 @@ struct CuratedWallInspector: View {
         // then center the whole decorated media horizontally in the inspector.
         let decorated = media
             .overlay(alignment: .topTrailing) {
-                if !isDetailPlaying {
+                if !isPlaying {
                     HStack(spacing: 2) {
                         Button { viewModel.showThumbnailInDetail = true } label: {
                             Text("Still").font(.caption2)
@@ -175,7 +165,7 @@ struct CuratedWallInspector: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if !isDetailPlaying, let d = v.formattedDuration {
+                if !isPlaying, let d = v.formattedDuration {
                     Text(d)
                         .font(.caption2.weight(.medium))
                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -191,18 +181,13 @@ struct CuratedWallInspector: View {
             .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    private func startPlayback(_ v: Video) {
-        viewModel.setInlinePlaybackMode(.detailPane)
-        viewModel.pendingFilmstripSeekSeconds = nil
-        viewModel.isPlayingInline = true
-    }
-
     private func filmstripSeekAndPlay(at location: CGPoint, size: CGSize, video: Video) {
+        // Seek to the clicked time and play in whatever mode the setting indicates (the host that
+        // mounts for that mode consumes `pendingFilmstripSeekSeconds`).
         let w = max(1.0, size.width)
         let progress = max(0.0, min(1.0, location.x / w))
         let dur = video.duration ?? 0.0
         viewModel.pendingFilmstripSeekSeconds = progress * dur
-        viewModel.setInlinePlaybackMode(.detailPane)
         viewModel.isPlayingInline = true
     }
 
@@ -222,23 +207,6 @@ struct CuratedWallInspector: View {
                 await MainActor.run { filmstrip = img }
             }
         }
-    }
-
-    private func startLocalHeroPlayer() {
-        guard let url = video?.url else { return }
-        stopHeroPlayer()
-        let p = AVPlayer(url: url)
-        heroPlayer = p
-        if let seek = viewModel.pendingFilmstripSeekSeconds, seek >= 0 {
-            p.seek(to: CMTime(seconds: seek, preferredTimescale: 600))
-            viewModel.pendingFilmstripSeekSeconds = nil
-        }
-        p.play()
-    }
-
-    private func stopHeroPlayer() {
-        heroPlayer?.pause()
-        heroPlayer = nil
     }
 
     // MARK: - Title + icon actions

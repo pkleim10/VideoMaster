@@ -89,7 +89,10 @@ final class InlinePlaybackController {
                 resumeBannerOpacity = 1
                 didAutoResume = false
                 resumedFromSeconds = nil
-                newPlayer.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { _ in newPlayer.play() }
+                // Precise seek (zero tolerance) so a filmstrip click lands on the clicked frame
+                // instead of snapping to the nearest keyframe.
+                newPlayer.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                               toleranceBefore: .zero, toleranceAfter: .zero) { _ in newPlayer.play() }
             } else {
                 cancelResumeBannerFadeTask()
                 resumeBannerOpacity = 1
@@ -135,13 +138,16 @@ final class InlinePlaybackController {
     }
 
     func restartFromBeginning() {
-        guard let player, let video = currentVideo else { return }
+        guard let player else { return }
         cancelResumeBannerFadeTask()
         didAutoResume = false
         resumedFromSeconds = nil
         resumeBannerOpacity = 1
-        PlaybackPositionStore.clear(filePath: video.filePath)
-        player.seek(to: .zero) { _ in player.play() }
+        if let video = currentVideo { PlaybackPositionStore.clear(filePath: video.filePath) }
+        player.pause()
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak player] _ in
+            player?.play()
+        }
     }
 
     /// Resume-banner "Start at beginning": clear the saved position and seek to 0.
