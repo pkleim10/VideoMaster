@@ -277,16 +277,32 @@ private struct LibraryContentView: View {
             // Enter/leave true full-screen by moving the *same* player into a borderless window.
             .onChange(of: vm.isPlayerFullScreen) { _, isFS in
                 if isFS {
-                    guard let player = vm.playback.player else { vm.isPlayerFullScreen = false; return }
-                    let controller = FullscreenInlinePlayerWindowController()
-                    fullScreenController = controller
-                    controller.present(
-                        player: player,
-                        title: selectedVideo?.fileName ?? "",
-                        startWindowInFullscreen: true,
-                        subtitleTrack: vm.playback.subtitleTrack
-                    ) {
-                        vm.isPlayerFullScreen = false
+                    guard fullScreenController == nil else { return }
+                    Task { @MainActor in
+                        // The controller creates its AVPlayer asynchronously in `start()`, so on the
+                        // "open at full screen" path the player isn't ready yet — wait briefly for it
+                        // (the manual full-screen button already has a player, so this returns at once).
+                        var player = vm.playback.player
+                        var waited = 0
+                        while player == nil, waited < 3000, vm.isPlayerFullScreen {
+                            try? await Task.sleep(for: .milliseconds(40))
+                            waited += 40
+                            player = vm.playback.player
+                        }
+                        guard vm.isPlayerFullScreen, fullScreenController == nil, let player else {
+                            if player == nil { vm.isPlayerFullScreen = false }
+                            return
+                        }
+                        let controller = FullscreenInlinePlayerWindowController()
+                        fullScreenController = controller
+                        controller.present(
+                            player: player,
+                            title: selectedVideo?.fileName ?? "",
+                            startWindowInFullscreen: true,
+                            subtitleTrack: vm.playback.subtitleTrack
+                        ) {
+                            vm.isPlayerFullScreen = false
+                        }
                     }
                 } else {
                     fullScreenController?.closeWindow()
