@@ -34,7 +34,8 @@ struct OverlayInlinePlayerView: View {
                         playback.startAtBeginning()
                     }
                     .opacity(playback.resumeBannerOpacity)
-                    .padding(10)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 34)   // clear the compact header strip
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
