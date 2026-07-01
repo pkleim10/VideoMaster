@@ -10,7 +10,7 @@
 - ⬜ 4. Fonts & sizing (design polish)
 - ⬜ 5. Top video details (design polish)
 - ⬜ 6. First-play/select delay (investigate — see the 720px per-card preview note; measure first)
-- ⬜ 7. Full-screen "last used size" (persist a "was full-screen" flag)
+- ✅ **7. Full-screen "last used size"** — persisted `playerLastWasFullScreen`; "Last used size" reopens full-screen. `8403837`
 - ⬜ 8. Delete a tag (context menu on chips)
 - ⬜ **NEW follow-up:** `CuratedWallGrid` has **no scroll-to-selection infrastructure** (only the list view does) — surfaced via Surprise Me (a picked card off-screen in Wall mode isn't scrolled into view). Broader than Surprise Me; add `ScrollViewReader` + scroll-to for the Wall grid.
 
