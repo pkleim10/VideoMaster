@@ -121,25 +121,44 @@ private struct LibraryContentView: View {
     }
 
     private var sortCluster: some View {
-        let currentSort = VideoSort.from(keyPath: vm.tableSortOrder.first?.keyPath ?? \Video.dateAdded)
-        let isAscending = vm.tableSortOrder.first?.order == .forward
+        let isCustomSort = vm.customSortFieldId != nil
+        let currentBuiltinSort = VideoSort.from(keyPath: vm.tableSortOrder.first?.keyPath ?? \Video.dateAdded)
+        let currentCustomField = vm.customMetadataFieldDefinitions.first { $0.id == vm.customSortFieldId }
+        let isAscending = isCustomSort ? vm.customSortAscending : (vm.tableSortOrder.first?.order == .forward)
+        let sortLabel = currentCustomField?.name ?? currentBuiltinSort.displayName
+        let sortableCustomFields = vm.customMetadataFieldDefinitions
+            .filter { $0.valueType != .text }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
         return HStack(spacing: 4) {
             Menu {
                 ForEach(VideoSort.allCases) { sort in
                     Button {
-                        vm.tableSortOrder = sort.comparators(ascending: isAscending)
-                        vm.savePreferences()
+                        vm.selectBuiltinSort(sort, ascending: isAscending)
                     } label: {
-                        if sort == currentSort {
+                        if !isCustomSort && sort == currentBuiltinSort {
                             Label(sort.displayName, systemImage: "checkmark")
                         } else {
                             Text(sort.displayName)
                         }
                     }
                 }
+                if !sortableCustomFields.isEmpty {
+                    Divider()
+                    ForEach(sortableCustomFields) { field in
+                        Button {
+                            vm.selectCustomSort(fieldId: field.id, ascending: isAscending)
+                        } label: {
+                            if vm.customSortFieldId == field.id {
+                                Label(field.name, systemImage: "checkmark")
+                            } else {
+                                Text(field.name)
+                            }
+                        }
+                    }
+                }
             } label: {
-                Text("Sort: \(currentSort.displayName)")
+                Text("Sort: \(sortLabel)")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.appTextSecondary)
             }
@@ -148,8 +167,12 @@ private struct LibraryContentView: View {
             .fixedSize()
 
             Button {
-                vm.tableSortOrder = currentSort.comparators(ascending: !isAscending)
-                vm.savePreferences()
+                if isCustomSort, let fieldId = vm.customSortFieldId {
+                    vm.selectCustomSort(fieldId: fieldId, ascending: !isAscending)
+                } else {
+                    vm.tableSortOrder = currentBuiltinSort.comparators(ascending: !isAscending)
+                    vm.savePreferences()
+                }
             } label: {
                 Image(systemName: isAscending ? "arrow.up" : "arrow.down")
                     .font(.system(size: 10, weight: .medium))
@@ -333,7 +356,7 @@ private struct LibraryContentView: View {
                 if vm.isPlayingInline, !vm.isPlayerFullScreen, let video = selectedVideo {
                     GeometryReader { geo in
                         FloatingPlayerPanel(video: video, viewModel: vm, available: geo.size)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }

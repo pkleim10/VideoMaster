@@ -33,9 +33,26 @@ final class LibraryViewModel {
     }
     var tableSortOrder: [KeyPathComparator<Video>] = [KeyPathComparator(\Video.dateAdded, order: .reverse)] {
         didSet {
+            // Ignore programmatic updates from selectCustomSort (which sets a sentinel to show the caret).
+            guard !_settingCustomSortOrder else { return }
+
+            let ascending = tableSortOrder.first?.order == .forward
+
+            // Custom column header click: sentinel keypath → sort by the corresponding custom field.
+            if let slot = Video.customSortSlot(from: tableSortOrder.first?.keyPath) {
+                let fields = allCustomFieldsForList
+                guard slot < fields.count else { return }
+                customSortAscending = ascending
+                customSortFieldId = fields[slot].id  // didSet → recomputeFilteredVideos + savePreferences
+                return
+            }
+
+            // Built-in column header click: clear any active custom sort.
+            customSortFieldId = nil  // didSet may fire recomputeFilteredVideos if it was non-nil
+
             let oldSort = VideoSort.from(keyPath: oldValue.first?.keyPath ?? \Video.dateAdded)
             let newSort = VideoSort.from(keyPath: tableSortOrder.first?.keyPath ?? \Video.dateAdded)
-            if oldSort != newSort, tableSortOrder.first?.order != .forward {
+            if oldSort != newSort, !ascending {
                 tableSortOrder = newSort.comparators(ascending: true)
                 return
             }
@@ -48,6 +65,27 @@ final class LibraryViewModel {
             } else {
                 pendingScrollAfterSortId = nil
             }
+            recomputeFilteredVideos()
+            savePreferences()
+        }
+    }
+
+    /// Suppresses `tableSortOrder.didSet` side-effects while `selectCustomSort` updates the sentinel.
+    @ObservationIgnored private var _settingCustomSortOrder = false
+
+    /// UUID of the custom metadata field currently used for sorting; nil = built-in sort via `tableSortOrder`.
+    private(set) var customSortFieldId: UUID? {
+        didSet {
+            guard oldValue != customSortFieldId else { return }
+            recomputeFilteredVideos()
+            savePreferences()
+        }
+    }
+
+    /// Sort direction for custom field sorts. Built-in sort direction lives in `tableSortOrder.first?.order`.
+    var customSortAscending: Bool = true {
+        didSet {
+            guard customSortFieldId != nil, oldValue != customSortAscending else { return }
             recomputeFilteredVideos()
             savePreferences()
         }
@@ -251,6 +289,8 @@ final class LibraryViewModel {
     private static let surpriseMeAutoPlaysKey = "VideoMaster.surpriseMeAutoPlays"
     private static let playerFloatingWidthKey = "VideoMaster.playerFloatingWidth"
     private static let playerFloatingHeightKey = "VideoMaster.playerFloatingHeight"
+    private static let playerFloatingPositionXKey = "VideoMaster.playerFloatingPositionX"
+    private static let playerFloatingPositionYKey = "VideoMaster.playerFloatingPositionY"
     private static let playerStartPreferenceKey = "VideoMaster.playerStartPreference"
     private static let playerSizeIsCompactKey = "VideoMaster.playerSizeIsCompact"
     private static let playerLastWasFullScreenKey = "VideoMaster.playerLastWasFullScreen"
@@ -397,13 +437,29 @@ final class LibraryViewModel {
 
     // MARK: - Single resizable player (redesign — see Playback_Redesign_Plan_2026-06-30.md)
 
-    /// Current in-window size of the single floating player (anchored top-right). Persisted as the
-    /// last size so the player reopens where the user left it.
+    /// Current in-window size of the single floating player. Persisted as the last size so the player
+    /// reopens where the user left it.
     var playerFloatingSize: CGSize = CGSize(width: 480, height: 300) {
         didSet {
             guard playerFloatingSize != oldValue else { return }
             UserDefaults.standard.set(Double(playerFloatingSize.width), forKey: Self.playerFloatingWidthKey)
             UserDefaults.standard.set(Double(playerFloatingSize.height), forKey: Self.playerFloatingHeightKey)
+        }
+    }
+
+    /// Center point of the floating player within the available area, in points. `nil` = use the
+    /// default position for the current size mode (top-right for Compact, center for S/M/L). Persisted
+    /// so the player reopens at the same position; clamping at display time handles window resizes.
+    var playerFloatingPosition: CGPoint? = nil {
+        didSet {
+            guard playerFloatingPosition != oldValue else { return }
+            if let p = playerFloatingPosition {
+                UserDefaults.standard.set(Double(p.x), forKey: Self.playerFloatingPositionXKey)
+                UserDefaults.standard.set(Double(p.y), forKey: Self.playerFloatingPositionYKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.playerFloatingPositionXKey)
+                UserDefaults.standard.removeObject(forKey: Self.playerFloatingPositionYKey)
+            }
         }
     }
 
@@ -552,6 +608,22 @@ final class LibraryViewModel {
         listColumnPreferences.visibleCustomFieldIDs.contains(fieldId)
     }
 
+    /// All non-text custom fields available as list columns (alphabetical; at most 16 — SwiftUI `Table` limit).
+    /// Used to emit all columns so they appear in the column header right-click menu.
+    var allCustomFieldsForList: [CustomMetadataFieldDefinition] {
+        Array(
+            customMetadataFieldDefinitions
+                .filter { $0.valueType != .text }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                .prefix(16)
+        )
+    }
+
+    /// Returns true if the custom field column should be shown by default (user toggled it on via Settings).
+    func isCustomFieldDefaultVisible(_ id: UUID) -> Bool {
+        listColumnPreferences.visibleCustomFieldIDs.contains(id)
+    }
+
     /// Custom columns shown in list view (alphabetical; at most 16 — SwiftUI `Table` column builder limit).
     var visibleCustomFieldsForList: [CustomMetadataFieldDefinition] {
         let visible = listColumnPreferences.visibleCustomFieldIDs
@@ -572,10 +644,14 @@ final class LibraryViewModel {
         return ListCustomMetadataCellFormatter.display(raw: raw, valueType: field.valueType)
     }
 
-    /// Bumps `Table` identity when visible column set changes.
+    /// Bumps `Table` identity when the column set or default-visibility state changes.
     var listColumnConfigurationSignature: String {
         let s = listColumnPreferences.visibleStandardColumnIDs.sorted().joined(separator: ",")
-        let c = listColumnPreferences.visibleCustomFieldIDs.map(\.uuidString).sorted().joined(separator: ",")
+        // Track which non-text fields exist AND which are default-visible, so toggling from Settings
+        // triggers a table rebuild that re-applies defaultVisibility.
+        let c = allCustomFieldsForList
+            .map { "\($0.id.uuidString):\(listColumnPreferences.visibleCustomFieldIDs.contains($0.id) ? "1" : "0")" }
+            .joined(separator: ",")
         return "\(s)|\(c)"
     }
 
@@ -774,9 +850,27 @@ final class LibraryViewModel {
         Self.encodeLayoutToUserDefaults(fixed)
     }
 
+    func selectBuiltinSort(_ sort: VideoSort, ascending: Bool) {
+        // tableSortOrder.didSet clears customSortFieldId and recomputes.
+        tableSortOrder = sort.comparators(ascending: ascending)
+    }
+
+    func selectCustomSort(fieldId: UUID, ascending: Bool) {
+        let slot = allCustomFieldsForList.firstIndex { $0.id == fieldId } ?? 0
+        // Update tableSortOrder to show the caret on the correct custom column, suppressing didSet side-effects.
+        _settingCustomSortOrder = true
+        tableSortOrder = [KeyPathComparator(Video.customSortKeyPath(slot: slot), order: ascending ? .forward : .reverse)]
+        _settingCustomSortOrder = false
+        customSortAscending = ascending
+        customSortFieldId = fieldId  // didSet → recomputeFilteredVideos + savePreferences
+    }
+
     func savePreferences() {
         let defaults = UserDefaults.standard
-        if let first = tableSortOrder.first {
+        if let fieldId = customSortFieldId {
+            defaults.set("custom:\(fieldId.uuidString)", forKey: Self.sortColumnKey)
+            defaults.set(customSortAscending, forKey: Self.sortAscendingKey)
+        } else if let first = tableSortOrder.first {
             let sort = VideoSort.from(keyPath: first.keyPath)
             defaults.set(sort.rawValue, forKey: Self.sortColumnKey)
             defaults.set(first.order == .forward, forKey: Self.sortAscendingKey)
@@ -785,11 +879,17 @@ final class LibraryViewModel {
 
     private func loadPreferences() {
         let defaults = UserDefaults.standard
-        if let sortRaw = defaults.string(forKey: Self.sortColumnKey),
-           let sort = VideoSort(rawValue: sortRaw)
-        {
+        if let sortRaw = defaults.string(forKey: Self.sortColumnKey) {
             let ascending = defaults.bool(forKey: Self.sortAscendingKey)
-            tableSortOrder = sort.comparators(ascending: ascending)
+            if sortRaw.hasPrefix("custom:"),
+               let uuid = UUID(uuidString: String(sortRaw.dropFirst("custom:".count)))
+            {
+                // Validate at recompute time (resolvedCustomSortField will be nil if field was deleted).
+                customSortFieldId = uuid
+                customSortAscending = ascending
+            } else if let sort = VideoSort(rawValue: sortRaw) {
+                tableSortOrder = sort.comparators(ascending: ascending)
+            }
         }
         excludeCorrupt = defaults.bool(forKey: Self.excludeCorruptKey)
         confirmDeletions = defaults.object(forKey: Self.confirmDeletionsKey) as? Bool ?? true
@@ -797,6 +897,11 @@ final class LibraryViewModel {
         if let w = defaults.object(forKey: Self.playerFloatingWidthKey) as? Double, w > 0,
            let h = defaults.object(forKey: Self.playerFloatingHeightKey) as? Double, h > 0 {
             playerFloatingSize = CGSize(width: w, height: h)
+        }
+        if let x = defaults.object(forKey: Self.playerFloatingPositionXKey) as? Double,
+           let y = defaults.object(forKey: Self.playerFloatingPositionYKey) as? Double,
+           x > 0, y > 0 {
+            playerFloatingPosition = CGPoint(x: x, y: y)
         }
         if let raw = defaults.string(forKey: Self.playerStartPreferenceKey),
            let pref = PlayerStartPreference(rawValue: raw) {
@@ -1000,6 +1105,9 @@ final class LibraryViewModel {
     private func recomputeFilteredVideos() {
         filterGeneration += 1
         let gen = filterGeneration
+        let resolvedCustomSortField = customSortFieldId.flatMap { id in
+            customMetadataFieldDefinitions.first { $0.id == id }
+        }
         let snapshot = FilterSnapshot(
             videos: videos,
             tagsByVideoId: tagsByVideoId,
@@ -1020,7 +1128,10 @@ final class LibraryViewModel {
             topRatedMinRating: topRatedMinRating,
             recentlyConvertedDates: recentlyConvertedEntries.reduce(into: [:]) { dict, e in dict[e.path] = e.date },
             minDurationSeconds: minDurationSeconds,
-            maxDurationSeconds: maxDurationSeconds
+            maxDurationSeconds: maxDurationSeconds,
+            customSortField: resolvedCustomSortField,
+            customSortAscending: customSortAscending,
+            listCustomMetadataByVideoId: listCustomMetadataByVideoId
         )
         let repo = collectionRepo
 
@@ -1055,6 +1166,9 @@ final class LibraryViewModel {
         let recentlyConvertedDates: [String: Date]
         let minDurationSeconds: Double?
         let maxDurationSeconds: Double?
+        let customSortField: CustomMetadataFieldDefinition?
+        let customSortAscending: Bool
+        let listCustomMetadataByVideoId: [Int64: [UUID: String]]
     }
 
     /// Multiple star levels are OR’d: video is included if its rating is in the selected set.
@@ -1102,6 +1216,111 @@ final class LibraryViewModel {
             }
         }
         return result
+    }
+
+    /// Sort by a custom metadata field. Pre-builds a typed value map so comparisons are concrete (no per-pair
+    /// string parsing). Missing/empty values sort last when ascending, first when descending.
+    private nonisolated static func sortByCustomField(
+        _ videos: [Video],
+        field: CustomMetadataFieldDefinition,
+        ascending: Bool,
+        metadata: [Int64: [UUID: String]]
+    ) -> [Video] {
+        switch field.valueType {
+        case .number:
+            var values: [Int64: Double] = [:]
+            for video in videos {
+                guard let vid = video.databaseId,
+                      let raw = metadata[vid]?[field.id]
+                else { continue }
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let d = Double(t) { values[vid] = d }
+            }
+            return videos.sorted { a, b in
+                let va = a.databaseId.flatMap { values[$0] }
+                let vb = b.databaseId.flatMap { values[$0] }
+                switch (va, vb) {
+                case (nil, nil): return false
+                case (nil, _):   return !ascending
+                case (_, nil):   return ascending
+                case let (l?, r?): return ascending ? l < r : l > r
+                }
+            }
+
+        case .date:
+            let isoDate: DateFormatter = {
+                let f = DateFormatter()
+                f.calendar = Calendar(identifier: .gregorian)
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.timeZone = TimeZone.current
+                f.dateFormat = "yyyy-MM-dd"
+                return f
+            }()
+            var values: [Int64: Date] = [:]
+            for video in videos {
+                guard let vid = video.databaseId,
+                      let raw = metadata[vid]?[field.id]
+                else { continue }
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let d = isoDate.date(from: t) { values[vid] = d }
+            }
+            return videos.sorted { a, b in
+                let va = a.databaseId.flatMap { values[$0] }
+                let vb = b.databaseId.flatMap { values[$0] }
+                switch (va, vb) {
+                case (nil, nil): return false
+                case (nil, _):   return !ascending
+                case (_, nil):   return ascending
+                case let (l?, r?): return ascending ? l < r : l > r
+                }
+            }
+
+        case .dateTime:
+            let isoFrac = ISO8601DateFormatter()
+            isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let isoPlain = ISO8601DateFormatter()
+            isoPlain.formatOptions = [.withInternetDateTime]
+            var values: [Int64: Date] = [:]
+            for video in videos {
+                guard let vid = video.databaseId,
+                      let raw = metadata[vid]?[field.id]
+                else { continue }
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let d = isoFrac.date(from: t) ?? isoPlain.date(from: t) { values[vid] = d }
+            }
+            return videos.sorted { a, b in
+                let va = a.databaseId.flatMap { values[$0] }
+                let vb = b.databaseId.flatMap { values[$0] }
+                switch (va, vb) {
+                case (nil, nil): return false
+                case (nil, _):   return !ascending
+                case (_, nil):   return ascending
+                case let (l?, r?): return ascending ? l < r : l > r
+                }
+            }
+
+        case .string, .text:
+            var values: [Int64: String] = [:]
+            for video in videos {
+                guard let vid = video.databaseId,
+                      let raw = metadata[vid]?[field.id]
+                else { continue }
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { values[vid] = t }
+            }
+            return videos.sorted { a, b in
+                let va = a.databaseId.flatMap { values[$0] }
+                let vb = b.databaseId.flatMap { values[$0] }
+                switch (va, vb) {
+                case (nil, nil): return false
+                case (nil, _):   return !ascending
+                case (_, nil):   return ascending
+                case let (l?, r?):
+                    let cmp = l.localizedStandardCompare(r)
+                    return ascending ? cmp == .orderedAscending : cmp == .orderedDescending
+                }
+            }
+        }
     }
 
     private nonisolated static func computeFilteredResult(snapshot: FilterSnapshot, collectionRepo: CollectionRepository) -> (videos: [Video], tagCounts: [Int64: Int]) {
@@ -1184,6 +1403,10 @@ final class LibraryViewModel {
                 (snapshot.recentlyConvertedDates[$0.filePath] ?? .distantPast) >
                 (snapshot.recentlyConvertedDates[$1.filePath] ?? .distantPast)
             }
+        } else if let field = snapshot.customSortField {
+            result = Self.sortByCustomField(
+                result, field: field, ascending: snapshot.customSortAscending,
+                metadata: snapshot.listCustomMetadataByVideoId)
         } else {
             result = Self.sortByTableOrder(result, comparators: snapshot.tableSortOrder)
         }

@@ -425,42 +425,46 @@ struct LibraryListView: View {
 
     @TableColumnBuilder<Video, KeyPathComparator<Video>>
     private func listCustomTableColumnsSlots0to7() -> some TableColumnContent<Video, KeyPathComparator<Video>> {
-        let fields = viewModel.visibleCustomFieldsForList
-        if fields.indices.contains(0) { listCustomColumn(for: fields[0]) }
-        if fields.indices.contains(1) { listCustomColumn(for: fields[1]) }
-        if fields.indices.contains(2) { listCustomColumn(for: fields[2]) }
-        if fields.indices.contains(3) { listCustomColumn(for: fields[3]) }
-        if fields.indices.contains(4) { listCustomColumn(for: fields[4]) }
-        if fields.indices.contains(5) { listCustomColumn(for: fields[5]) }
-        if fields.indices.contains(6) { listCustomColumn(for: fields[6]) }
-        if fields.indices.contains(7) { listCustomColumn(for: fields[7]) }
+        let fields = viewModel.allCustomFieldsForList
+        if fields.indices.contains(0) { listCustomColumn(for: fields[0], slot: 0) }
+        if fields.indices.contains(1) { listCustomColumn(for: fields[1], slot: 1) }
+        if fields.indices.contains(2) { listCustomColumn(for: fields[2], slot: 2) }
+        if fields.indices.contains(3) { listCustomColumn(for: fields[3], slot: 3) }
+        if fields.indices.contains(4) { listCustomColumn(for: fields[4], slot: 4) }
+        if fields.indices.contains(5) { listCustomColumn(for: fields[5], slot: 5) }
+        if fields.indices.contains(6) { listCustomColumn(for: fields[6], slot: 6) }
+        if fields.indices.contains(7) { listCustomColumn(for: fields[7], slot: 7) }
     }
 
     @TableColumnBuilder<Video, KeyPathComparator<Video>>
     private func listCustomTableColumnsSlots8to15() -> some TableColumnContent<Video, KeyPathComparator<Video>> {
-        let fields = viewModel.visibleCustomFieldsForList
-        if fields.indices.contains(8) { listCustomColumn(for: fields[8]) }
-        if fields.indices.contains(9) { listCustomColumn(for: fields[9]) }
-        if fields.indices.contains(10) { listCustomColumn(for: fields[10]) }
-        if fields.indices.contains(11) { listCustomColumn(for: fields[11]) }
-        if fields.indices.contains(12) { listCustomColumn(for: fields[12]) }
-        if fields.indices.contains(13) { listCustomColumn(for: fields[13]) }
-        if fields.indices.contains(14) { listCustomColumn(for: fields[14]) }
-        if fields.indices.contains(15) { listCustomColumn(for: fields[15]) }
+        let fields = viewModel.allCustomFieldsForList
+        if fields.indices.contains(8)  { listCustomColumn(for: fields[8],  slot: 8)  }
+        if fields.indices.contains(9)  { listCustomColumn(for: fields[9],  slot: 9)  }
+        if fields.indices.contains(10) { listCustomColumn(for: fields[10], slot: 10) }
+        if fields.indices.contains(11) { listCustomColumn(for: fields[11], slot: 11) }
+        if fields.indices.contains(12) { listCustomColumn(for: fields[12], slot: 12) }
+        if fields.indices.contains(13) { listCustomColumn(for: fields[13], slot: 13) }
+        if fields.indices.contains(14) { listCustomColumn(for: fields[14], slot: 14) }
+        if fields.indices.contains(15) { listCustomColumn(for: fields[15], slot: 15) }
     }
 
     @TableColumnBuilder<Video, KeyPathComparator<Video>>
-    private func listCustomColumn(for field: CustomMetadataFieldDefinition) -> some TableColumnContent<
+    private func listCustomColumn(for field: CustomMetadataFieldDefinition, slot: Int) -> some TableColumnContent<
         Video,
         KeyPathComparator<Video>
     > {
-        TableColumn(field.name, value: \.fileName) { video in
+        // Sentinel keypath gives the column a unique sort identity for caret display and header-click detection.
+        // defaultVisibility reflects the Settings > List Columns toggle; columnCustomization overrides it.
+        let defaultVis: Visibility = viewModel.isCustomFieldDefaultVisible(field.id) ? .visible : .hidden
+        TableColumn(field.name, value: Video.customSortKeyPath(slot: slot)) { video in
             Text(viewModel.listCustomFieldDisplay(for: video, field: field))
                 .lineLimit(2)
                 .foregroundStyle(Color.appTextSecondary)
         }
         .width(min: 80, ideal: 120)
         .customizationID("custom-\(field.id.uuidString)")
+        .defaultVisibility(defaultVis)
     }
 
     @ViewBuilder

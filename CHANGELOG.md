@@ -31,6 +31,12 @@ See `AGENTS.md` and `.cursor/rules/build-deploy.mdc` for the full agent and rele
 
 ## Unreleased
 
+## 0.17.0 (build 548) - 2026-07-01
+
+- **Custom metadata fields in sort and List View columns**: all non-text custom field types (String, Number, Date, Date & Time) now appear in the toolbar Sort menu (after a separator below the built-in options) and as right-click-toggleable columns in List View. Sort uses pre-built typed value maps for concrete comparisons — no per-row string parsing, zero performance regression. Missing values sort last. Selection, direction, and persistence match built-in sort behavior.
+- **Floating player is now movable**: drag the title bar to reposition the panel anywhere in the content area. Compact always snaps to the top-right inspector footprint (unchanged). S/M/L presets center the panel on the application window when clicked. The resize handle (bottom-left) still keeps the top-right corner pinned while resizing. Position persists across launches; clamping handles window-size changes.
+- **Sort fixes**: clicking a List View column header now re-sorts immediately (was moving the caret but not applying); selecting a custom-field sort from the toolbar dropdown now moves the column header caret to that column. Arrow direction follows the universal convention (↑ = ascending).
+
 ## 0.16.0 (build 520) - 2026-07-01
 
 - Curated Wall cleanup:
